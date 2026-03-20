@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, isInitializeRequest, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { getConfig } from "./lib/config.js";
 import { BitbucketClient } from "./lib/bitbucket-client.js";
-import { TOOLS } from "./lib/tools.js";
+import { EXPOSED_TOOL_NAMES, TOOLS } from "./lib/tools.js";
 import { handleToolCall } from "./lib/handlers.js";
 import * as logger from "./lib/logger.js";
 import { createSessionStore } from "./lib/session-store.js";
@@ -21,7 +21,8 @@ const client = new BitbucketClient({
     userEmail: config.bitbucket.userEmail,
     apiToken: config.bitbucket.apiToken,
     requestTimeoutMs: config.requestTimeoutMs,
-    maxResponseBytes: config.maxResponseBytes
+    maxResponseBytes: config.maxResponseBytes,
+    cloneRoot: config.cloneRoot
 });
 
 function asTextResult(payload) {
@@ -41,6 +42,9 @@ function createMcpServer() {
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
         try {
+            if (!EXPOSED_TOOL_NAMES.has(name)) {
+                throw new Error(`Tool non esposto dal surface MCP corrente: ${name}`);
+            }
             const result = await handleToolCall(name, args, client);
             return asTextResult(result);
         } catch (error) {
@@ -140,6 +144,7 @@ app.get("/health", (_req, res) => {
         endpoint: config.server.path,
         workspace: config.bitbucket.workspace,
         repoSlug: config.bitbucket.repoSlug,
+        cloneRoot: config.cloneRoot,
         pid: process.pid,
         uptimeSec: Math.floor(process.uptime()),
         activeSessions: sessions.size()

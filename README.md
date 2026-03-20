@@ -4,8 +4,8 @@ MCP server per Bitbucket Cloud con:
 
 - tool semantici per pull request
 - commenti PR
-- clone repository
-- endpoint `bb_api` come escape hatch REST
+- clone repository confinato sotto una clone root configurata
+- endpoint `bb_api` generico ma read-only (solo GET)
 - logging strutturato per integrazione con `mcp-dashboard`
 
 ## Requisiti
@@ -32,6 +32,7 @@ Nota:
 - `BITBUCKET_API_TOKEN` non deve stare nel `.env`
 - il server rifiuta l'avvio se trova il token nel file `.env`
 - il token va passato solo a runtime, per esempio dalla dashboard
+- `MCP_BB_CLONE_ROOT` puo' definire la root autorizzata per i clone; se assente usa `_clones` sotto la root del progetto
 
 ## Avvio
 
@@ -59,5 +60,7 @@ MCP endpoint:
 
 ## Note
 
-- `create_pull_request`, `approve_pull_request` e `merge_pull_request` sono implementati ma non esposti nel surface MCP corrente
+- `create_pull_request`, `approve_pull_request` e `merge_pull_request` non fanno parte del surface MCP corrente e vengono rifiutati anche se un client prova a chiamarli direttamente
+- `bb_api` supporta solo richieste GET
+- `bb_clone` accetta `targetPath` solo se resta sotto `MCP_BB_CLONE_ROOT`
 - il server usa sessioni MCP streamable HTTP e logging strutturato `LLM_BB_MCP`
