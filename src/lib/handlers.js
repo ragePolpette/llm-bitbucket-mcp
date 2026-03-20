@@ -9,9 +9,6 @@ export async function handleToolCall(name, args, client) {
         case "get_pull_request_diff":     return handleGetPRDiff(args, client);
         case "get_pull_request_comments": return handleGetPRComments(args, client);
         case "add_pull_request_comment":  return handleAddPRComment(args, client);
-        case "create_pull_request":       return handleCreatePR(args, client);
-        case "approve_pull_request":      return handleApprovePR(args, client);
-        case "merge_pull_request":        return handleMergePR(args, client);
         case "bb_clone":                  return handleClone(args, client);
         case "bb_api":                    return handleGenericApi(args, client);
         default: throw new Error(`Tool non supportato: ${name}`);
@@ -140,7 +137,8 @@ async function handleAddPRComment(args, client) {
 
     const isInline = !!(args.file_path && args.line_to);
     logger.logApiCall("POST", `pullrequests/${args.pr_id}/comments`, "add_pull_request_comment", "in", {
-        content: args.content.slice(0, 100), inline: isInline
+        inline: isInline,
+        content_length: String(args.content.length)
     });
     const result = await client.request("POST", client.repoPath(`pullrequests/${args.pr_id}/comments`), { body });
     logger.logApiCall("POST", `pullrequests/${args.pr_id}/comments`, "add_pull_request_comment", "out", {
@@ -207,7 +205,8 @@ async function handleClone(args, client) {
     requireParam(args, "targetPath");
 
     logger.logApiCall("POST", `clone/${args.repoSlug}`, "bb_clone", "in", {
-        content: `${args.workspaceSlug || "default"}/${args.repoSlug} -> ${args.targetPath}`
+        workspace_slug: args.workspaceSlug || "default",
+        repo_slug: args.repoSlug
     });
     const result = await client.clone(args.workspaceSlug, args.repoSlug, args.targetPath);
     logger.logApiCall("POST", `clone/${args.repoSlug}`, "bb_clone", "out", { success: true });
@@ -219,13 +218,17 @@ async function handleGenericApi(args, client) {
     requireParam(args, "method");
     requireParam(args, "path");
 
+    const method = String(args.method || "").trim().toUpperCase();
+    if (method !== "GET") {
+        throw new Error("bb_api supporta solo richieste read-only GET.");
+    }
+
     const tool = "bb_api";
-    logger.logApiCall(args.method, args.path, tool, "in", {});
-    const result = await client.request(args.method, args.path, {
-        body: args.body,
+    logger.logApiCall(method, args.path, tool, "in", {});
+    const result = await client.request(method, args.path, {
         queryParams: args.queryParams
     });
-    logger.logApiCall(args.method, args.path, tool, "out", { success: true });
+    logger.logApiCall(method, args.path, tool, "out", { success: true });
 
     return result;
 }

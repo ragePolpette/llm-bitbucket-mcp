@@ -48,6 +48,14 @@ function getLocalHostFallback() {
 
 let envLoaded = false;
 
+export function resolveCloneRoot(rawValue, cwd = process.cwd()) {
+    const configured = String(rawValue || "").trim();
+    if (!configured) {
+        return path.resolve(cwd, "_clones");
+    }
+    return path.resolve(configured);
+}
+
 function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
     if (envLoaded) return;
     envLoaded = true;
@@ -114,6 +122,7 @@ export function getConfig() {
         requestTimeoutMs: Math.max(5000, Math.min(toInt(process.env.MCP_BB_REQUEST_TIMEOUT_MS, 30000), 120000)),
         maxResponseBytes: 5 * 1024 * 1024,
         sessionTtlMs: Math.max(0, toInt(process.env.MCP_BB_SESSION_TTL_MS, 0)),
+        cloneRoot: resolveCloneRoot(process.env.MCP_BB_CLONE_ROOT),
         server: {
             host: process.env.MCP_BB_HOST || "127.0.0.1",
             port: Math.max(1, Math.min(toInt(process.env.MCP_BB_PORT, 8783), 65535)),

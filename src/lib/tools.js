@@ -95,7 +95,7 @@ export const TOOLS = [
     // ── Utility tools ────────────────────────────────────────────
     {
         name: "bb_clone",
-        description: "Clona un repository Bitbucket in locale (SSH preferred, HTTPS fallback).",
+        description: "Clona un repository Bitbucket in locale sotto la clone root configurata (SSH preferred, HTTPS fallback).",
         annotations: { readOnlyHint: false },
         inputSchema: {
             type: "object",
@@ -106,7 +106,7 @@ export const TOOLS = [
                 },
                 targetPath: {
                     type: "string",
-                    description: "Path assoluto dove clonare il repo."
+                    description: "Directory base, dentro la clone root configurata, dove creare la cartella del repo."
                 },
                 workspaceSlug: {
                     type: "string",
@@ -118,23 +118,23 @@ export const TOOLS = [
     },
     {
         name: "bb_api",
-        description: "Chiamata generica all'API Bitbucket REST 2.0. Usare per endpoint non coperti dai tool semantici (es. pipelines, snippet, workspace).",
-        annotations: { readOnlyHint: false },
+        description: "Chiamata generica read-only all'API Bitbucket REST 2.0. Supporta solo GET per endpoint non coperti dai tool semantici.",
+        annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
             properties: {
                 method: {
                     type: "string",
-                    enum: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-                    description: "Metodo HTTP."
+                    enum: ["GET"],
+                    description: "Metodo HTTP consentito. Solo GET."
                 },
                 path: {
                     type: "string",
-                    description: "API path (es. '/repositories/studioboost/bpopilot/pipelines'). /2.0/ preposto automaticamente se mancante."
+                    description: "API path read-only (es. '/repositories/studioboost/bpopilot/pipelines'). /2.0/ preposto automaticamente se mancante."
                 },
                 body: {
                     type: "object",
-                    description: "Request body JSON (per POST/PUT/PATCH)."
+                    description: "Non usato. Lasciare vuoto."
                 },
                 queryParams: {
                     type: "object",
@@ -194,3 +194,5 @@ export const TOOLS = [
  *     }
  * }
  */
+
+export const EXPOSED_TOOL_NAMES = new Set(TOOLS.map(tool => tool.name));

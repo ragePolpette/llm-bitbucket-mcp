@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 export class BitbucketApiError extends Error {
@@ -18,14 +19,42 @@ const FRIENDLY_ERRORS = {
     429: "Rate limited da Bitbucket. Riprova tra qualche secondo."
 };
 
+export function normalizeBitbucketApiPath(rawPath) {
+    const apiPath = String(rawPath || "").trim();
+    if (!apiPath) {
+        throw new Error("API path Bitbucket mancante.");
+    }
+    if (!apiPath.startsWith("/2.0/") && !apiPath.startsWith("/2.0")) {
+        return `/2.0${apiPath.startsWith("/") ? "" : "/"}${apiPath}`;
+    }
+    return apiPath;
+}
+
+export function isPathWithinRoot(candidatePath, rootPath) {
+    const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function assertCloneBasePathAllowed(targetPath, cloneRoot) {
+    const resolvedBase = path.resolve(targetPath);
+    const resolvedRoot = path.resolve(cloneRoot);
+    if (!isPathWithinRoot(resolvedBase, resolvedRoot)) {
+        throw new Error(
+            `targetPath non consentito: deve restare sotto la clone root configurata (${resolvedRoot}).`
+        );
+    }
+    return resolvedBase;
+}
+
 export class BitbucketClient {
-    constructor({ apiBase, workspace, repoSlug, userEmail, apiToken, requestTimeoutMs, maxResponseBytes }) {
+    constructor({ apiBase, workspace, repoSlug, userEmail, apiToken, requestTimeoutMs, maxResponseBytes, cloneRoot }) {
         this._apiBase = apiBase;
         this._workspace = workspace;
         this._repoSlug = repoSlug;
         this._authHeader = "Basic " + Buffer.from(`${userEmail}:${apiToken}`).toString("base64");
         this._timeoutMs = requestTimeoutMs;
         this._maxBytes = maxResponseBytes;
+        this._cloneRoot = path.resolve(cloneRoot);
     }
 
     repoPath(suffix) {
@@ -33,11 +62,7 @@ export class BitbucketClient {
     }
 
     async request(method, rawPath, { body, queryParams, accept } = {}) {
-        let apiPath = rawPath;
-        if (!apiPath.startsWith("/2.0/") && !apiPath.startsWith("/2.0")) {
-            apiPath = `/2.0${apiPath.startsWith("/") ? "" : "/"}${apiPath}`;
-        }
-
+        const apiPath = normalizeBitbucketApiPath(rawPath);
         const url = new URL(apiPath, this._apiBase);
         if (queryParams) {
             for (const [key, value] of Object.entries(queryParams)) {
@@ -115,8 +140,9 @@ export class BitbucketClient {
         }
 
         const ws = workspaceSlug || this._workspace;
-        const resolvedPath = path.resolve(targetPath);
-        const dest = path.join(resolvedPath, repoSlug);
+        const resolvedBase = assertCloneBasePathAllowed(targetPath, this._cloneRoot);
+        fs.mkdirSync(resolvedBase, { recursive: true });
+        const dest = path.join(resolvedBase, repoSlug);
 
         const sshUrl = `git@bitbucket.org:${ws}/${repoSlug}.git`;
         const httpsUrl = `https://bitbucket.org/${ws}/${repoSlug}.git`;

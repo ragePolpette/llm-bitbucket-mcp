@@ -5,7 +5,8 @@
   "type": "module",
   "description": "MCP server for Bitbucket Cloud — semantic PR tools + generic API escape hatch, with dashboard logging.",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"
