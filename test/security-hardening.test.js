@@ -33,13 +33,19 @@ test("bb_api normalizes Bitbucket API paths", () => {
 
 test("clone target path must stay within configured clone root", () => {
     const cloneRoot = path.resolve("C:/tmp/bitbucket-clones");
-    const allowed = path.join(cloneRoot, "nested");
+    const allowed = path.join(cloneRoot, "nested", "repo-name");
     assert.equal(assertCloneBasePathAllowed(allowed, cloneRoot), allowed);
 
     assert.throws(
         () => assertCloneBasePathAllowed("C:/tmp/outside", cloneRoot),
         /clone root configurata/
     );
+});
+
+test("clone target path is the final destination path", () => {
+    const cloneRoot = path.resolve("C:/tmp/bitbucket-clones");
+    const finalClonePath = path.join(cloneRoot, "team", "custom-repo-dir");
+    assert.equal(assertCloneBasePathAllowed(finalClonePath, cloneRoot), finalClonePath);
 });
 
 test("default clone root resolves under current working directory", () => {

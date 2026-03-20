@@ -140,9 +140,8 @@ export class BitbucketClient {
         }
 
         const ws = workspaceSlug || this._workspace;
-        const resolvedBase = assertCloneBasePathAllowed(targetPath, this._cloneRoot);
-        fs.mkdirSync(resolvedBase, { recursive: true });
-        const dest = path.join(resolvedBase, repoSlug);
+        const dest = assertCloneBasePathAllowed(targetPath, this._cloneRoot);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
 
         const sshUrl = `git@bitbucket.org:${ws}/${repoSlug}.git`;
         const httpsUrl = `https://bitbucket.org/${ws}/${repoSlug}.git`;

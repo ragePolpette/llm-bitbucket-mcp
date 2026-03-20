@@ -106,7 +106,7 @@ export const TOOLS = [
                 },
                 targetPath: {
                     type: "string",
-                    description: "Directory base, dentro la clone root configurata, dove creare la cartella del repo."
+                    description: "Path finale completo del clone, dentro la clone root configurata."
                 },
                 workspaceSlug: {
                     type: "string",

@@ -62,5 +62,5 @@ MCP endpoint:
 
 - `create_pull_request`, `approve_pull_request` e `merge_pull_request` non fanno parte del surface MCP corrente e vengono rifiutati anche se un client prova a chiamarli direttamente
 - `bb_api` supporta solo richieste GET
-- `bb_clone` accetta `targetPath` solo se resta sotto `MCP_BB_CLONE_ROOT`
+- `bb_clone` usa `targetPath` come percorso finale esatto del clone e lo accetta solo se resta sotto `MCP_BB_CLONE_ROOT`
 - il server usa sessioni MCP streamable HTTP e logging strutturato `LLM_BB_MCP`
