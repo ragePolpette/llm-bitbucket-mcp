@@ -1,0 +1,13 @@
+{
+  "name": "llm-bitbucket-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for Bitbucket Cloud — semantic PR tools + generic API escape hatch, with dashboard logging.",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
