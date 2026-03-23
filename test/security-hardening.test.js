@@ -6,11 +6,62 @@ import { handleToolCall } from "../src/lib/handlers.js";
 import { assertCloneBasePathAllowed, normalizeBitbucketApiPath } from "../src/lib/bitbucket-client.js";
 import { resolveCloneRoot } from "../src/lib/config.js";
 
-test("hidden pull request mutation handlers are rejected by dispatcher", async () => {
+test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
-        () => handleToolCall("create_pull_request", { title: "x", source_branch: "y" }, {}),
+        () => handleToolCall("approve_pull_request", { pr_id: 123 }, {}),
         /Tool non supportato/
     );
+    await assert.rejects(
+        () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}),
+        /Tool non supportato/
+    );
+});
+
+test("create_pull_request is dispatched when explicitly exposed", async () => {
+    const requests = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            return { id: 77, title: body.title, links: { html: { href: "https://bitbucket/pr/77" } } };
+        }
+    };
+
+    const result = await handleToolCall(
+        "create_pull_request",
+        {
+            title: "Nuova PR",
+            source_branch: "feature/test",
+            description: "Descrizione",
+            destination_branch: "main",
+            reviewers: ["{reviewer-uuid}"],
+            close_source_branch: false
+        },
+        client
+    );
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0], {
+        method: "POST",
+        path: "/repositories/ws/repo/pullrequests",
+        body: {
+            title: "Nuova PR",
+            source: { branch: { name: "feature/test" } },
+            destination: { branch: { name: "main" } },
+            close_source_branch: false,
+            description: "Descrizione",
+            reviewers: [{ uuid: "{reviewer-uuid}" }]
+        }
+    });
+    assert.deepEqual(result, {
+        id: 77,
+        title: "Nuova PR",
+        link: "https://bitbucket/pr/77",
+        source_branch: "feature/test",
+        destination_branch: "main"
+    });
 });
 
 test("bb_api rejects non-GET methods", async () => {

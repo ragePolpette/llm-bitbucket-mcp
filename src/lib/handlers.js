@@ -9,6 +9,7 @@ export async function handleToolCall(name, args, client) {
         case "get_pull_request_diff":     return handleGetPRDiff(args, client);
         case "get_pull_request_comments": return handleGetPRComments(args, client);
         case "add_pull_request_comment":  return handleAddPRComment(args, client);
+        case "create_pull_request":       return handleCreatePR(args, client);
         case "bb_clone":                  return handleClone(args, client);
         case "bb_api":                    return handleGenericApi(args, client);
         default: throw new Error(`Tool non supportato: ${name}`);
