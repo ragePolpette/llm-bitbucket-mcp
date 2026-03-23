@@ -20,6 +20,7 @@ test("still-hidden pull request mutation handlers are rejected by dispatcher", a
 test("create_pull_request is dispatched when explicitly exposed", async () => {
     const requests = [];
     const client = {
+        defaultDestinationBranch: "",
         repoPath(path) {
             return `/repositories/ws/repo/${path}`;
         },
@@ -62,6 +63,46 @@ test("create_pull_request is dispatched when explicitly exposed", async () => {
         source_branch: "feature/test",
         destination_branch: "main"
     });
+});
+
+test("create_pull_request uses configured default destination branch when omitted", async () => {
+    const client = {
+        defaultDestinationBranch: "develop",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(_method, _path, { body } = {}) {
+            return { id: 88, title: body.title, links: { html: { href: "https://bitbucket/pr/88" } } };
+        }
+    };
+
+    const result = await handleToolCall(
+        "create_pull_request",
+        {
+            title: "PR default branch",
+            source_branch: "feature/default"
+        },
+        client
+    );
+
+    assert.equal(result.destination_branch, "develop");
+});
+
+test("create_pull_request fails without explicit or configured destination branch", async () => {
+    const client = {
+        defaultDestinationBranch: "",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            throw new Error("should not be called");
+        }
+    };
+
+    await assert.rejects(
+        () => handleToolCall("create_pull_request", { title: "No target", source_branch: "feature/x" }, client),
+        /destination_branch/
+    );
 });
 
 test("bb_api rejects non-GET methods", async () => {

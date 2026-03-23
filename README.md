@@ -33,6 +33,7 @@ Nota:
 - il server rifiuta l'avvio se trova il token nel file `.env`
 - il token va passato solo a runtime, per esempio dalla dashboard
 - `MCP_BB_CLONE_ROOT` puo' definire la root autorizzata per i clone; se assente usa `_clones` sotto la root del progetto
+- `BITBUCKET_DEFAULT_DESTINATION_BRANCH` puo' definire il branch di destinazione di default per `create_pull_request`; se assente va passato ogni volta al tool
 
 ## Avvio
 
@@ -55,12 +56,13 @@ MCP endpoint:
 - `get_pull_request_diff`
 - `get_pull_request_comments`
 - `add_pull_request_comment`
+- `create_pull_request`
 - `bb_clone`
 - `bb_api`
 
 ## Note
 
-- `create_pull_request`, `approve_pull_request` e `merge_pull_request` non fanno parte del surface MCP corrente e vengono rifiutati anche se un client prova a chiamarli direttamente
+- `create_pull_request` e' esposto; `approve_pull_request` e `merge_pull_request` restano fuori dal surface MCP corrente e vengono rifiutati se un client prova a chiamarli direttamente
 - `bb_api` supporta solo richieste GET
 - `bb_clone` usa `targetPath` come percorso finale esatto del clone e lo accetta solo se resta sotto `MCP_BB_CLONE_ROOT`
 - il server usa sessioni MCP streamable HTTP e logging strutturato `LLM_BB_MCP`

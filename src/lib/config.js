@@ -117,6 +117,7 @@ export function getConfig() {
             apiToken,
             workspace: String(process.env.BITBUCKET_WORKSPACE || "studioboost").trim(),
             repoSlug: String(process.env.BITBUCKET_REPO_SLUG || "bpopilot").trim(),
+            defaultDestinationBranch: String(process.env.BITBUCKET_DEFAULT_DESTINATION_BRANCH || "").trim(),
             apiBase: "https://api.bitbucket.org"
         },
         requestTimeoutMs: Math.max(5000, Math.min(toInt(process.env.MCP_BB_REQUEST_TIMEOUT_MS, 30000), 120000)),

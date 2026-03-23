@@ -152,11 +152,18 @@ async function handleAddPRComment(args, client) {
 async function handleCreatePR(args, client) {
     requireParam(args, "title");
     requireParam(args, "source_branch");
+    const destinationBranch = String(args.destination_branch || client.defaultDestinationBranch || "").trim();
+    if (!destinationBranch) {
+        throw new Error(
+            "Parametro obbligatorio mancante: destination_branch. " +
+            "Passalo esplicitamente oppure configura BITBUCKET_DEFAULT_DESTINATION_BRANCH."
+        );
+    }
 
     const body = {
         title: args.title,
         source: { branch: { name: args.source_branch } },
-        destination: { branch: { name: args.destination_branch || "BPOFH" } },
+        destination: { branch: { name: destinationBranch } },
         close_source_branch: args.close_source_branch ?? true
     };
     if (args.description) body.description = args.description;
@@ -168,7 +175,7 @@ async function handleCreatePR(args, client) {
         success: true, entry_id: result.id
     });
 
-    return { id: result.id, title: result.title, link: result.links?.html?.href, source_branch: args.source_branch, destination_branch: args.destination_branch || "BPOFH" };
+    return { id: result.id, title: result.title, link: result.links?.html?.href, source_branch: args.source_branch, destination_branch: destinationBranch };
 }
 
 async function handleApprovePR(args, client) {

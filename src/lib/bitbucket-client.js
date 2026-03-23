@@ -47,10 +47,11 @@ export function assertCloneBasePathAllowed(targetPath, cloneRoot) {
 }
 
 export class BitbucketClient {
-    constructor({ apiBase, workspace, repoSlug, userEmail, apiToken, requestTimeoutMs, maxResponseBytes, cloneRoot }) {
+    constructor({ apiBase, workspace, repoSlug, userEmail, apiToken, requestTimeoutMs, maxResponseBytes, cloneRoot, defaultDestinationBranch }) {
         this._apiBase = apiBase;
         this._workspace = workspace;
         this._repoSlug = repoSlug;
+        this._defaultDestinationBranch = String(defaultDestinationBranch || "").trim();
         this._authHeader = "Basic " + Buffer.from(`${userEmail}:${apiToken}`).toString("base64");
         this._timeoutMs = requestTimeoutMs;
         this._maxBytes = maxResponseBytes;
@@ -59,6 +60,10 @@ export class BitbucketClient {
 
     repoPath(suffix) {
         return `/repositories/${this._workspace}/${this._repoSlug}/${suffix}`;
+    }
+
+    get defaultDestinationBranch() {
+        return this._defaultDestinationBranch;
     }
 
     async request(method, rawPath, { body, queryParams, accept } = {}) {
