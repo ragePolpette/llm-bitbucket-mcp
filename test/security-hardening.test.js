@@ -6,10 +6,102 @@ import { handleToolCall } from "../src/lib/handlers.js";
 import { assertCloneBasePathAllowed, normalizeBitbucketApiPath } from "../src/lib/bitbucket-client.js";
 import { resolveCloneRoot } from "../src/lib/config.js";
 
-test("hidden pull request mutation handlers are rejected by dispatcher", async () => {
+test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
-        () => handleToolCall("create_pull_request", { title: "x", source_branch: "y" }, {}),
+        () => handleToolCall("approve_pull_request", { pr_id: 123 }, {}),
         /Tool non supportato/
+    );
+    await assert.rejects(
+        () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}),
+        /Tool non supportato/
+    );
+});
+
+test("create_pull_request is dispatched when explicitly exposed", async () => {
+    const requests = [];
+    const client = {
+        defaultDestinationBranch: "",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            return { id: 77, title: body.title, links: { html: { href: "https://bitbucket/pr/77" } } };
+        }
+    };
+
+    const result = await handleToolCall(
+        "create_pull_request",
+        {
+            title: "Nuova PR",
+            source_branch: "feature/test",
+            description: "Descrizione",
+            destination_branch: "main",
+            reviewers: ["{reviewer-uuid}"],
+            close_source_branch: false
+        },
+        client
+    );
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0], {
+        method: "POST",
+        path: "/repositories/ws/repo/pullrequests",
+        body: {
+            title: "Nuova PR",
+            source: { branch: { name: "feature/test" } },
+            destination: { branch: { name: "main" } },
+            close_source_branch: false,
+            description: "Descrizione",
+            reviewers: [{ uuid: "{reviewer-uuid}" }]
+        }
+    });
+    assert.deepEqual(result, {
+        id: 77,
+        title: "Nuova PR",
+        link: "https://bitbucket/pr/77",
+        source_branch: "feature/test",
+        destination_branch: "main"
+    });
+});
+
+test("create_pull_request uses configured default destination branch when omitted", async () => {
+    const client = {
+        defaultDestinationBranch: "develop",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(_method, _path, { body } = {}) {
+            return { id: 88, title: body.title, links: { html: { href: "https://bitbucket/pr/88" } } };
+        }
+    };
+
+    const result = await handleToolCall(
+        "create_pull_request",
+        {
+            title: "PR default branch",
+            source_branch: "feature/default"
+        },
+        client
+    );
+
+    assert.equal(result.destination_branch, "develop");
+});
+
+test("create_pull_request fails without explicit or configured destination branch", async () => {
+    const client = {
+        defaultDestinationBranch: "",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            throw new Error("should not be called");
+        }
+    };
+
+    await assert.rejects(
+        () => handleToolCall("create_pull_request", { title: "No target", source_branch: "feature/x" }, client),
+        /destination_branch/
     );
 });
 
