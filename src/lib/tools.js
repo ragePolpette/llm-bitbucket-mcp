@@ -1,7 +1,7 @@
 /**
  * Tool definitions exposed via MCP ListTools.
  *
- * NOTE: create_pull_request, approve_pull_request, merge_pull_request
+ * NOTE: approve_pull_request and merge_pull_request
  * have handlers implemented but are NOT exposed here yet.
  * To enable them, add their definitions to the TOOLS array.
  */
@@ -91,6 +91,33 @@ export const TOOLS = [
             required: ["pr_id", "content"]
         }
     },
+    {
+        name: "create_pull_request",
+        description: "Crea una nuova pull request su Bitbucket dal branch sorgente verso il branch di destinazione.",
+        annotations: { readOnlyHint: false, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                title: { type: "string", description: "Titolo della PR." },
+                source_branch: { type: "string", description: "Branch sorgente." },
+                description: { type: "string", description: "Descrizione Markdown della PR." },
+                destination_branch: {
+                    type: "string",
+                    description: "Branch destinazione. Default: BPOFH."
+                },
+                reviewers: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "UUID Bitbucket dei reviewer."
+                },
+                close_source_branch: {
+                    type: "boolean",
+                    description: "Chiudi il branch sorgente dopo il merge. Default: true."
+                }
+            },
+            required: ["title", "source_branch"]
+        }
+    },
 
     // ── Utility tools ────────────────────────────────────────────
     {
@@ -151,23 +178,6 @@ export const TOOLS = [
  * ── Tool definitions ready but NOT exposed ─────────────────────
  * Uncomment and add to TOOLS array to enable:
  *
- * {
- *     name: "create_pull_request",
- *     description: "Crea una nuova pull request.",
- *     annotations: { readOnlyHint: false, idempotentHint: false },
- *     inputSchema: {
- *         type: "object",
- *         properties: {
- *             title: { type: "string", description: "Titolo della PR." },
- *             source_branch: { type: "string", description: "Branch sorgente." },
- *             description: { type: "string", description: "Descrizione (Markdown)." },
- *             destination_branch: { type: "string", description: "Branch destinazione. Default: BPOFH." },
- *             reviewers: { type: "array", items: { type: "string" }, description: "UUID Bitbucket dei reviewer." },
- *             close_source_branch: { type: "boolean", description: "Chiudi branch dopo merge. Default: true." }
- *         },
- *         required: ["title", "source_branch"]
- *     }
- * },
  * {
  *     name: "approve_pull_request",
  *     description: "Approva una pull request (come utente autenticato).",

@@ -20,6 +20,7 @@ const client = new BitbucketClient({
     repoSlug: config.bitbucket.repoSlug,
     userEmail: config.bitbucket.userEmail,
     apiToken: config.bitbucket.apiToken,
+    defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
     requestTimeoutMs: config.requestTimeoutMs,
     maxResponseBytes: config.maxResponseBytes,
     cloneRoot: config.cloneRoot
@@ -144,6 +145,7 @@ app.get("/health", (_req, res) => {
         endpoint: config.server.path,
         workspace: config.bitbucket.workspace,
         repoSlug: config.bitbucket.repoSlug,
+        defaultDestinationBranch: config.bitbucket.defaultDestinationBranch || null,
         cloneRoot: config.cloneRoot,
         pid: process.pid,
         uptimeSec: Math.floor(process.uptime()),
