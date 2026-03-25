@@ -81,7 +81,7 @@ Definition of done:
 Notes:
 
 - branch: `feature/config-runtime-hardening`
-- PR:
+- PR: `#6`
 - merged on:
 
 ### P0.3 API Boundary Hardening
