@@ -57,6 +57,17 @@ test("session store prunes expired entries before applying capacity", () => {
     assert.deepEqual(sessions.get("two", now + 61_000), {});
 });
 
+test("session access extends the TTL window", () => {
+    const now = Date.now();
+    const sessions = createSessionStore({ ttlMs: 60_000, maxSessions: 2 });
+    const transport = { id: "transport" };
+
+    sessions.set("one", transport, now);
+    assert.deepEqual(sessions.get("one", now + 30_000), transport);
+    assert.equal(sessions.get("one", now + 89_000), transport);
+    assert.equal(sessions.get("one", now + 151_000), null);
+});
+
 test("health payload is minimal and runtime-oriented", () => {
     const payload = buildHealthPayload({
         endpoint: "/mcp",
