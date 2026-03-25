@@ -1,4 +1,15 @@
 import * as logger from "./logger.js";
+import { isRepoScopedBitbucketApiPath, normalizeBitbucketApiPath } from "./bitbucket-client.js";
+
+const MAX_BRANCH_NAME_LENGTH = 255;
+const MAX_TITLE_LENGTH = 200;
+const MAX_DESCRIPTION_LENGTH = 10000;
+const MAX_COMMENT_LENGTH = 10000;
+const MAX_FILE_PATH_LENGTH = 500;
+const MAX_REVIEWERS = 10;
+const MAX_QUERY_PARAMS = 20;
+const MAX_QUERY_VALUE_LENGTH = 200;
+const ALLOWED_PR_STATES = new Set(["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]);
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
@@ -53,9 +64,9 @@ function handleBitbucketInfo(client) {
             create_pull_request:
                 "Richiede title e source_branch. destination_branch puo' arrivare dal payload oppure da BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
             open_pull_request: "Alias ergonomico di create_pull_request con lo stesso contract.",
-            bb_api: "Solo GET read-only per endpoint non coperti dai tool semantici.",
+            bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
             bb_clone:
-                "Clona dentro la clone root configurata; targetPath deve restare sotto quella root.",
+                "Clona dentro la clone root configurata; targetPath deve restare sotto quella root e deve essere nuovo.",
         },
         runtime_options: {
             default_destination_branch_configured: Boolean(client.defaultDestinationBranch),
@@ -72,6 +83,13 @@ function handleBitbucketInfo(client) {
 // ── PR read handlers ─────────────────────────────────────────────
 
 async function handleListPRs(args, client) {
+    validateOptionalEnum(args.state, "state", ALLOWED_PR_STATES);
+    validateOptionalString(args.source_branch, "source_branch", {
+        maxLength: MAX_BRANCH_NAME_LENGTH,
+    });
+    validateOptionalInteger(args.page, "page", { min: 1 });
+    validateOptionalInteger(args.pagelen, "pagelen", { min: 1, max: 50 });
+
     const result = await listPullRequests(args, client);
     return {
         count: result.size,
@@ -81,7 +99,11 @@ async function handleListPRs(args, client) {
 }
 
 async function handleFindOpenPR(args, client) {
-    requireParam(args, "source_branch");
+    requireStringParam(args, "source_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
+    validateOptionalString(args.destination_branch, "destination_branch", {
+        maxLength: MAX_BRANCH_NAME_LENGTH,
+    });
+    validateOptionalInteger(args.pagelen, "pagelen", { min: 1, max: 50 });
 
     const queryArgs = {
         state: "OPEN",
@@ -107,7 +129,7 @@ async function handleFindOpenPR(args, client) {
 }
 
 async function handleGetPR(args, client) {
-    requireParam(args, "pr_id");
+    requirePositiveIntegerParam(args, "pr_id");
 
     logger.logApiCall("GET", `pullrequests/${args.pr_id}`, "get_pull_request", "in", {});
     const pr = await client.request("GET", client.repoPath(`pullrequests/${args.pr_id}`));
@@ -142,7 +164,7 @@ async function handleGetPR(args, client) {
 }
 
 async function handleGetPRDiff(args, client) {
-    requireParam(args, "pr_id");
+    requirePositiveIntegerParam(args, "pr_id");
 
     logger.logApiCall("GET", `pullrequests/${args.pr_id}/diff`, "get_pull_request_diff", "in", {});
     const text = await client.request("GET", client.repoPath(`pullrequests/${args.pr_id}/diff`), {
@@ -165,7 +187,7 @@ async function handleGetPRDiff(args, client) {
 }
 
 async function handleGetPRComments(args, client) {
-    requireParam(args, "pr_id");
+    requirePositiveIntegerParam(args, "pr_id");
 
     logger.logApiCall(
         "GET",
@@ -225,8 +247,9 @@ async function handleGetPRComments(args, client) {
 // ── PR write handlers ────────────────────────────────────────────
 
 async function handleAddPRComment(args, client) {
-    requireParam(args, "pr_id");
-    requireParam(args, "content");
+    requirePositiveIntegerParam(args, "pr_id");
+    requireStringParam(args, "content", { maxLength: MAX_COMMENT_LENGTH });
+    validateInlineCommentArgs(args);
 
     const body = { content: { raw: args.content } };
     if (args.file_path && args.line_to) {
@@ -264,8 +287,12 @@ async function handleAddPRComment(args, client) {
 }
 
 async function handleCreatePR(args, client) {
-    requireParam(args, "title");
-    requireParam(args, "source_branch");
+    requireStringParam(args, "title", { maxLength: MAX_TITLE_LENGTH });
+    requireStringParam(args, "source_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
+    validateOptionalString(args.description, "description", { maxLength: MAX_DESCRIPTION_LENGTH });
+    validateOptionalBoolean(args.close_source_branch, "close_source_branch");
+    validateReviewerList(args.reviewers);
+
     const destinationBranch = String(
         args.destination_branch || client.defaultDestinationBranch || "",
     ).trim();
@@ -274,6 +301,10 @@ async function handleCreatePR(args, client) {
             "Parametro obbligatorio mancante: destination_branch. " +
                 "Passalo esplicitamente oppure configura BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
         );
+    }
+    validateString(destinationBranch, "destination_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
+    if (destinationBranch === args.source_branch) {
+        throw new Error("source_branch e destination_branch non possono coincidere.");
     }
 
     const body = {
@@ -302,7 +333,7 @@ async function handleCreatePR(args, client) {
 }
 
 async function handleApprovePR(args, client) {
-    requireParam(args, "pr_id");
+    requirePositiveIntegerParam(args, "pr_id");
 
     logger.logApiCall(
         "POST",
@@ -323,7 +354,7 @@ async function handleApprovePR(args, client) {
 }
 
 async function handleMergePR(args, client) {
-    requireParam(args, "pr_id");
+    requirePositiveIntegerParam(args, "pr_id");
 
     const body = {
         merge_strategy: args.merge_strategy || "merge_commit",
@@ -353,8 +384,9 @@ async function handleMergePR(args, client) {
 // ── Utility handlers ─────────────────────────────────────────────
 
 async function handleClone(args, client) {
-    requireParam(args, "repoSlug");
-    requireParam(args, "targetPath");
+    requireStringParam(args, "repoSlug", { maxLength: 100 });
+    requireStringParam(args, "targetPath", { maxLength: 500 });
+    validateOptionalString(args.workspaceSlug, "workspaceSlug", { maxLength: 100 });
 
     logger.logApiCall("POST", `clone/${args.repoSlug}`, "bb_clone", "in", {
         workspace_slug: args.workspaceSlug || "default",
@@ -367,8 +399,8 @@ async function handleClone(args, client) {
 }
 
 async function handleGenericApi(args, client) {
-    requireParam(args, "method");
-    requireParam(args, "path");
+    requireStringParam(args, "method", { maxLength: 10 });
+    requireStringParam(args, "path", { maxLength: 500 });
 
     const method = String(args.method || "")
         .trim()
@@ -376,6 +408,8 @@ async function handleGenericApi(args, client) {
     if (method !== "GET") {
         throw new Error("bb_api supporta solo richieste read-only GET.");
     }
+    assertRepoScopedApiPath(args.path, client);
+    validateQueryParams(args.queryParams);
 
     const tool = "bb_api";
     logger.logApiCall(method, args.path, tool, "in", {});
@@ -420,6 +454,14 @@ function buildPullRequestQuery(sourceBranch, destinationBranch) {
     return clauses.join(" AND ");
 }
 
+function assertRepoScopedApiPath(rawPath, client) {
+    const { workspace, repoSlug } = client.repoScope;
+    if (!isRepoScopedBitbucketApiPath(rawPath, workspace, repoSlug)) {
+        throw new Error("bb_api puo' interrogare solo endpoint del repository configurato.");
+    }
+    return normalizeBitbucketApiPath(rawPath);
+}
+
 function escapeQueryValue(value) {
     return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -432,9 +474,120 @@ function isExactOpenMatch(pr, args) {
     );
 }
 
-function requireParam(args, name) {
+function requireStringParam(args, name, options = {}) {
     if (args[name] === undefined || args[name] === null || args[name] === "") {
         throw new Error(`Parametro obbligatorio mancante: ${name}`);
+    }
+    return validateString(args[name], name, options);
+}
+
+function requirePositiveIntegerParam(args, name) {
+    if (args[name] === undefined || args[name] === null || args[name] === "") {
+        throw new Error(`Parametro obbligatorio mancante: ${name}`);
+    }
+    return validateInteger(args[name], name, { min: 1 });
+}
+
+function validateOptionalString(value, name, options = {}) {
+    if (value === undefined || value === null || value === "") return null;
+    return validateString(value, name, options);
+}
+
+function validateString(value, name, { maxLength } = {}) {
+    if (typeof value !== "string") {
+        throw new Error(`${name} deve essere una stringa.`);
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        throw new Error(`${name} non puo' essere vuoto.`);
+    }
+    if (maxLength && trimmed.length > maxLength) {
+        throw new Error(`${name} supera la lunghezza massima consentita (${maxLength}).`);
+    }
+    return trimmed;
+}
+
+function validateOptionalInteger(value, name, options = {}) {
+    if (value === undefined || value === null || value === "") return null;
+    return validateInteger(value, name, options);
+}
+
+function validateInteger(value, name, { min, max } = {}) {
+    if (!Number.isInteger(value)) {
+        throw new Error(`${name} deve essere un intero.`);
+    }
+    if (min !== undefined && value < min) {
+        throw new Error(`${name} deve essere maggiore o uguale a ${min}.`);
+    }
+    if (max !== undefined && value > max) {
+        throw new Error(`${name} deve essere minore o uguale a ${max}.`);
+    }
+    return value;
+}
+
+function validateOptionalBoolean(value, name) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "boolean") {
+        throw new Error(`${name} deve essere booleano.`);
+    }
+    return value;
+}
+
+function validateOptionalEnum(value, name, allowedValues) {
+    if (value === undefined || value === null || value === "") return null;
+    if (!allowedValues.has(value)) {
+        throw new Error(`${name} non valido. Valori consentiti: ${[...allowedValues].join(", ")}.`);
+    }
+    return value;
+}
+
+function validateReviewerList(reviewers) {
+    if (reviewers === undefined || reviewers === null) return null;
+    if (!Array.isArray(reviewers)) {
+        throw new Error("reviewers deve essere un array di stringhe.");
+    }
+    if (reviewers.length > MAX_REVIEWERS) {
+        throw new Error(`reviewers supera il massimo consentito (${MAX_REVIEWERS}).`);
+    }
+    for (const reviewer of reviewers) {
+        validateString(reviewer, "reviewers[]", { maxLength: 100 });
+    }
+    return reviewers;
+}
+
+function validateInlineCommentArgs(args) {
+    const hasFilePath =
+        args.file_path !== undefined && args.file_path !== null && args.file_path !== "";
+    const hasLineTo = args.line_to !== undefined && args.line_to !== null && args.line_to !== "";
+    if (hasFilePath !== hasLineTo) {
+        throw new Error("Per i commenti inline devi passare sia file_path sia line_to.");
+    }
+    if (hasFilePath) {
+        validateString(args.file_path, "file_path", { maxLength: MAX_FILE_PATH_LENGTH });
+        validateInteger(args.line_to, "line_to", { min: 1 });
+    }
+}
+
+function validateQueryParams(queryParams) {
+    if (queryParams === undefined || queryParams === null) return null;
+    if (typeof queryParams !== "object" || Array.isArray(queryParams)) {
+        throw new Error("queryParams deve essere un oggetto chiave/valore.");
+    }
+    const entries = Object.entries(queryParams);
+    if (entries.length > MAX_QUERY_PARAMS) {
+        throw new Error(`queryParams supera il massimo consentito (${MAX_QUERY_PARAMS}).`);
+    }
+    for (const [key, value] of entries) {
+        validateString(key, "queryParams key", { maxLength: 100 });
+        const scalar = String(value ?? "").trim();
+        if (!scalar) {
+            throw new Error(`queryParams['${key}'] non puo' essere vuoto.`);
+        }
+        if (scalar.length > MAX_QUERY_VALUE_LENGTH) {
+            throw new Error(
+                `queryParams['${key}'] supera la lunghezza massima consentita (${MAX_QUERY_VALUE_LENGTH}).`,
+            );
+        }
     }
 }
 
