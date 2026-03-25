@@ -16,8 +16,8 @@ Questo server copre PR e metadati remoti del repository. Branch locali, checkout
 
 - Node.js 22+
 - credenziali Bitbucket Cloud:
-  - `BITBUCKET_USER_EMAIL`
-  - `BITBUCKET_API_TOKEN`
+    - `BITBUCKET_USER_EMAIL`
+    - `BITBUCKET_API_TOKEN`
 
 ## Setup
 

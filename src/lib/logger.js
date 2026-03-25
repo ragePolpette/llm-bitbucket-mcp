@@ -16,8 +16,12 @@ export function logEvent(event, payload = {}) {
 export function logApiCall(method, path, tool, phase, payload = {}) {
     const isRead = method === "GET";
     const event = isRead
-        ? (phase === "in" ? "query_in" : "query_out")
-        : (phase === "in" ? "write_in" : "write_out");
+        ? phase === "in"
+            ? "query_in"
+            : "query_out"
+        : phase === "in"
+          ? "write_in"
+          : "write_out";
 
     const fields = { tool, operation: method, ...payload };
 
@@ -36,7 +40,7 @@ export function logError(event, error) {
     const timestamp = new Date().toISOString();
     const payload = {
         message: error instanceof Error ? error.message : String(error),
-        level: "ERROR"
+        level: "ERROR",
     };
     if (error instanceof Error && error.status) {
         payload.status = error.status;

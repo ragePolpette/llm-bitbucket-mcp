@@ -16,7 +16,7 @@ function parseCsvList(value, fallback) {
     if (value === undefined || value === null || value === "") return [...fallback];
     const list = String(value)
         .split(",")
-        .map(item => item.trim())
+        .map((item) => item.trim())
         .filter(Boolean);
     return list.length ? uniqueLower(list) : [...fallback];
 }
@@ -36,7 +36,9 @@ function uniqueLower(items) {
 }
 
 function getLocalHostFallback() {
-    const hostname = String(os.hostname() || "").trim().toLowerCase();
+    const hostname = String(os.hostname() || "")
+        .trim()
+        .toLowerCase();
     const hostCandidates = uniqueLower(["localhost", "127.0.0.1", "[::1]", hostname]);
     const originCandidates = [];
     for (const host of hostCandidates) {
@@ -61,7 +63,13 @@ function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
     envLoaded = true;
 
     const forbidden = new Set(
-        forbiddenKeys.map(key => String(key || "").trim().toLowerCase()).filter(Boolean)
+        forbiddenKeys
+            .map((key) =>
+                String(key || "")
+                    .trim()
+                    .toLowerCase(),
+            )
+            .filter(Boolean),
     );
 
     const envPath = path.resolve(process.cwd(), ".env");
@@ -77,13 +85,13 @@ function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
         const key = line.slice(0, idx).trim();
         if (forbidden.has(key.toLowerCase())) {
             throw new Error(
-                `Il file .env non puo' contenere ${key}: deve essere fornito solo a runtime (es. dalla dashboard).`
+                `Il file .env non puo' contenere ${key}: deve essere fornito solo a runtime (es. dalla dashboard).`,
             );
         }
 
         let value = line.slice(idx + 1);
         if (
-            (value.startsWith("\"") && value.endsWith("\"")) ||
+            (value.startsWith('"') && value.endsWith('"')) ||
             (value.startsWith("'") && value.endsWith("'"))
         ) {
             value = value.slice(1, -1);
@@ -97,7 +105,7 @@ function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
 
 export function getConfig() {
     loadDotEnvFromCwd({
-        forbiddenKeys: ["BITBUCKET_API_TOKEN"]
+        forbiddenKeys: ["BITBUCKET_API_TOKEN"],
     });
     const localFallback = getLocalHostFallback();
 
@@ -106,8 +114,8 @@ export function getConfig() {
     if (!userEmail || !apiToken) {
         throw new Error(
             "BITBUCKET_USER_EMAIL e BITBUCKET_API_TOKEN sono obbligatori.\n" +
-            "  - BITBUCKET_USER_EMAIL: inserisci nel .env o come env var.\n" +
-            "  - BITBUCKET_API_TOKEN: deve essere fornito solo a runtime (mai nel .env). Usa la dashboard."
+                "  - BITBUCKET_USER_EMAIL: inserisci nel .env o come env var.\n" +
+                "  - BITBUCKET_API_TOKEN: deve essere fornito solo a runtime (mai nel .env). Usa la dashboard.",
         );
     }
 
@@ -117,10 +125,15 @@ export function getConfig() {
             apiToken,
             workspace: String(process.env.BITBUCKET_WORKSPACE || "studioboost").trim(),
             repoSlug: String(process.env.BITBUCKET_REPO_SLUG || "bpopilot").trim(),
-            defaultDestinationBranch: String(process.env.BITBUCKET_DEFAULT_DESTINATION_BRANCH || "").trim(),
-            apiBase: "https://api.bitbucket.org"
+            defaultDestinationBranch: String(
+                process.env.BITBUCKET_DEFAULT_DESTINATION_BRANCH || "",
+            ).trim(),
+            apiBase: "https://api.bitbucket.org",
         },
-        requestTimeoutMs: Math.max(5000, Math.min(toInt(process.env.MCP_BB_REQUEST_TIMEOUT_MS, 30000), 120000)),
+        requestTimeoutMs: Math.max(
+            5000,
+            Math.min(toInt(process.env.MCP_BB_REQUEST_TIMEOUT_MS, 30000), 120000),
+        ),
         maxResponseBytes: 5 * 1024 * 1024,
         sessionTtlMs: Math.max(0, toInt(process.env.MCP_BB_SESSION_TTL_MS, 0)),
         cloneRoot: resolveCloneRoot(process.env.MCP_BB_CLONE_ROOT),
@@ -129,8 +142,14 @@ export function getConfig() {
             port: Math.max(1, Math.min(toInt(process.env.MCP_BB_PORT, 8783), 65535)),
             path: process.env.MCP_BB_PATH || "/mcp",
             sseEnabled: toBool(process.env.MCP_BB_SSE_ENABLED, false),
-            allowedHosts: parseCsvList(process.env.MCP_BB_ALLOWED_HOSTS, localFallback.allowedHosts),
-            allowedOrigins: parseCsvList(process.env.MCP_BB_ALLOWED_ORIGINS, localFallback.allowedOrigins)
-        }
+            allowedHosts: parseCsvList(
+                process.env.MCP_BB_ALLOWED_HOSTS,
+                localFallback.allowedHosts,
+            ),
+            allowedOrigins: parseCsvList(
+                process.env.MCP_BB_ALLOWED_ORIGINS,
+                localFallback.allowedOrigins,
+            ),
+        },
     };
 }

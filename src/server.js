@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CallToolRequestSchema, isInitializeRequest, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+    CallToolRequestSchema,
+    isInitializeRequest,
+    ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { getConfig } from "./lib/config.js";
 import { BitbucketClient } from "./lib/bitbucket-client.js";
 import { EXPOSED_TOOL_NAMES, TOOLS } from "./lib/tools.js";
@@ -23,19 +27,19 @@ const client = new BitbucketClient({
     defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
     requestTimeoutMs: config.requestTimeoutMs,
     maxResponseBytes: config.maxResponseBytes,
-    cloneRoot: config.cloneRoot
+    cloneRoot: config.cloneRoot,
 });
 
 function asTextResult(payload) {
     return {
-        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
     };
 }
 
 function createMcpServer() {
     const server = new Server(
         { name: "llm-bitbucket-mcp", version: "1.0.0" },
-        { capabilities: { tools: {} } }
+        { capabilities: { tools: {} } },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
@@ -51,12 +55,21 @@ function createMcpServer() {
         } catch (error) {
             logger.logError("tool_error", error);
             return {
-                content: [{ type: "text", text: JSON.stringify({
-                    success: false,
-                    error: error.message,
-                    status: error.status || null
-                }, null, 2) }],
-                isError: true
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(
+                            {
+                                success: false,
+                                error: error.message,
+                                status: error.status || null,
+                            },
+                            null,
+                            2,
+                        ),
+                    },
+                ],
+                isError: true,
             };
         }
     });
@@ -78,24 +91,32 @@ function normalizeOrigin(origin) {
         const host = parsed.hostname.toLowerCase();
         if (!["http:", "https:"].includes(protocol) || !host) return null;
         return parsed.port ? `${protocol}//${host}:${parsed.port}` : `${protocol}//${host}`;
-    } catch { return null; }
+    } catch {
+        return null;
+    }
 }
 
 function isOriginAllowed(origin, allowedOrigins) {
     const normalizedOrigin = normalizeOrigin(origin);
     if (!normalizedOrigin) return false;
     for (const rawPattern of allowedOrigins) {
-        const pattern = String(rawPattern || "").trim().toLowerCase();
+        const pattern = String(rawPattern || "")
+            .trim()
+            .toLowerCase();
         if (!pattern) continue;
         if (pattern === normalizedOrigin) return true;
-        if (pattern.endsWith(":*") && normalizedOrigin.startsWith(`${pattern.slice(0, -2)}:`)) return true;
+        if (pattern.endsWith(":*") && normalizedOrigin.startsWith(`${pattern.slice(0, -2)}:`))
+            return true;
     }
     return false;
 }
 
 function withOriginValidation(req, res, next) {
     const origin = normalizeHeaderValue(req.headers.origin);
-    if (!origin) { next(); return; }
+    if (!origin) {
+        next();
+        return;
+    }
     if (!isOriginAllowed(origin, config.server.allowedOrigins)) {
         res.status(403).json(createErrorResponse("Forbidden: Origin not allowed"));
         return;
@@ -126,7 +147,7 @@ function sendUnknownSession(res) {
 
 const app = createMcpExpressApp({
     host: config.server.host,
-    allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined
+    allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
 });
 
 app.use(withOriginValidation);
@@ -149,7 +170,7 @@ app.get("/health", (_req, res) => {
         cloneRoot: config.cloneRoot,
         pid: process.pid,
         uptimeSec: Math.floor(process.uptime()),
-        activeSessions: sessions.size()
+        activeSessions: sessions.size(),
     });
 });
 
@@ -166,15 +187,21 @@ app.post(config.server.path, async (req, res) => {
             await transport.handleRequest(req, res, req.body);
             return;
         }
-        if (sessionId && !transport) { sendUnknownSession(res); return; }
-        if (hasSessionHeader && !sessionId) { sendUnknownSession(res); return; }
+        if (sessionId && !transport) {
+            sendUnknownSession(res);
+            return;
+        }
+        if (hasSessionHeader && !sessionId) {
+            sendUnknownSession(res);
+            return;
+        }
 
         if (!sessionId && isInitializeRequest(req.body)) {
             const server = createMcpServer();
             transport = new StreamableHTTPServerTransport({
                 sessionIdGenerator: () => randomUUID(),
                 enableJsonResponse: !config.server.sseEnabled,
-                onsessioninitialized: sid => sessions.set(sid, transport)
+                onsessioninitialized: (sid) => sessions.set(sid, transport),
             });
             transport.onclose = () => {
                 const sid = transport.sessionId;
@@ -198,35 +225,61 @@ app.get(config.server.path, async (req, res) => {
         return;
     }
     const rawSessionId = req.headers["mcp-session-id"];
-    if (rawSessionId === undefined) { sendMissingSession(res); return; }
+    if (rawSessionId === undefined) {
+        sendMissingSession(res);
+        return;
+    }
     const sessionId = normalizeHeaderValue(rawSessionId);
     const transport = sessionId ? sessions.get(sessionId) : null;
-    if (!sessionId || !transport) { sendUnknownSession(res); return; }
+    if (!sessionId || !transport) {
+        sendUnknownSession(res);
+        return;
+    }
     try {
         await transport.handleRequest(req, res);
     } catch (error) {
-        if (!res.headersSent) res.status(500).json(createErrorResponse(error instanceof Error ? error.message : "Internal server error"));
+        if (!res.headersSent)
+            res.status(500).json(
+                createErrorResponse(
+                    error instanceof Error ? error.message : "Internal server error",
+                ),
+            );
     }
 });
 
 app.delete(config.server.path, async (req, res) => {
     const rawSessionId = req.headers["mcp-session-id"];
-    if (rawSessionId === undefined) { sendMissingSession(res); return; }
+    if (rawSessionId === undefined) {
+        sendMissingSession(res);
+        return;
+    }
     const sessionId = normalizeHeaderValue(rawSessionId);
     const transport = sessionId ? sessions.get(sessionId) : null;
-    if (!sessionId || !transport) { sendUnknownSession(res); return; }
+    if (!sessionId || !transport) {
+        sendUnknownSession(res);
+        return;
+    }
     try {
         await transport.handleRequest(req, res);
     } catch (error) {
-        if (!res.headersSent) res.status(500).json(createErrorResponse(error instanceof Error ? error.message : "Internal server error"));
+        if (!res.headersSent)
+            res.status(500).json(
+                createErrorResponse(
+                    error instanceof Error ? error.message : "Internal server error",
+                ),
+            );
     }
 });
 
-app.listen(config.server.port, config.server.host, error => {
+app.listen(config.server.port, config.server.host, (error) => {
     if (error) {
         console.error("Failed to start llm-bitbucket-mcp:", error);
         process.exit(1);
     }
-    console.log(`llm-bitbucket-mcp listening at http://${config.server.host}:${config.server.port}${config.server.path}`);
-    console.log(`[CONFIG] workspace=${config.bitbucket.workspace} repo=${config.bitbucket.repoSlug}`);
+    console.log(
+        `llm-bitbucket-mcp listening at http://${config.server.host}:${config.server.port}${config.server.path}`,
+    );
+    console.log(
+        `[CONFIG] workspace=${config.bitbucket.workspace} repo=${config.bitbucket.repoSlug}`,
+    );
 });
