@@ -120,7 +120,7 @@ Definition of done:
 Notes:
 
 - branch: `feature/test-expansion`
-- PR:
+- PR: `#8`
 - merged on:
 
 ### P0.5 README And Portfolio Polish
