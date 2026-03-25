@@ -17,6 +17,15 @@ test("still-hidden pull request mutation handlers are rejected by dispatcher", a
     );
 });
 
+test("bitbucket_info exposes tool map and runtime branch semantics", async () => {
+    const result = await handleToolCall("bitbucket_info", {}, { defaultDestinationBranch: "develop" });
+
+    assert.equal(result.server, "llm-bitbucket-mcp");
+    assert.ok(result.tool_map.discovery.includes("find_open_pull_request"));
+    assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
+    assert.equal(result.runtime_options.default_destination_branch, "develop");
+});
+
 test("create_pull_request is dispatched when explicitly exposed", async () => {
     const requests = [];
     const client = {
@@ -63,6 +72,117 @@ test("create_pull_request is dispatched when explicitly exposed", async () => {
         source_branch: "feature/test",
         destination_branch: "main"
     });
+});
+
+test("find_open_pull_request returns the matching open PR summary", async () => {
+    const requests = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { queryParams } = {}) {
+            requests.push({ method, path, queryParams });
+            return {
+                size: 1,
+                page: 1,
+                values: [
+                    {
+                        id: 11,
+                        title: "Open match",
+                        state: "OPEN",
+                        author: { display_name: "Alice" },
+                        source: { branch: { name: "feature/match" } },
+                        destination: { branch: { name: "main" } },
+                        created_on: "2026-03-25T10:00:00Z",
+                        updated_on: "2026-03-25T11:00:00Z",
+                        comment_count: 3,
+                        links: { html: { href: "https://bitbucket/pr/11" } }
+                    }
+                ]
+            };
+        }
+    };
+
+    const result = await handleToolCall(
+        "find_open_pull_request",
+        {
+            source_branch: "feature/match",
+            destination_branch: "main"
+        },
+        client
+    );
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].queryParams, {
+        state: "OPEN",
+        q: "source.branch.name=\"feature/match\" AND destination.branch.name=\"main\"",
+        page: "1",
+        pagelen: "50"
+    });
+    assert.deepEqual(result, {
+        pull_request: {
+            id: 11,
+            title: "Open match",
+            state: "OPEN",
+            author: "Alice",
+            source_branch: "feature/match",
+            destination_branch: "main",
+            created_on: "2026-03-25T10:00:00Z",
+            updated_on: "2026-03-25T11:00:00Z",
+            comment_count: 3,
+            link: "https://bitbucket/pr/11"
+        }
+    });
+});
+
+test("find_open_pull_request returns null when no open PR matches", async () => {
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            return { size: 0, page: 1, values: [] };
+        }
+    };
+
+    const result = await handleToolCall(
+        "find_open_pull_request",
+        {
+            source_branch: "feature/missing"
+        },
+        client
+    );
+
+    assert.deepEqual(result, { pull_request: null });
+});
+
+test("open_pull_request is a thin alias for create_pull_request", async () => {
+    const requests = [];
+    const client = {
+        defaultDestinationBranch: "",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            return { id: 91, title: body.title, links: { html: { href: "https://bitbucket/pr/91" } } };
+        }
+    };
+
+    const result = await handleToolCall(
+        "open_pull_request",
+        {
+            title: "Alias PR",
+            source_branch: "feature/alias",
+            destination_branch: "main"
+        },
+        client
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].path, "/repositories/ws/repo/pullrequests");
+    assert.equal(result.id, 91);
+    assert.equal(result.destination_branch, "main");
 });
 
 test("create_pull_request uses configured default destination branch when omitted", async () => {

@@ -8,6 +8,10 @@ MCP server per Bitbucket Cloud con:
 - endpoint `bb_api` generico ma read-only (solo GET)
 - logging strutturato per integrazione con `mcp-dashboard`
 
+## Boundary operativo
+
+Questo server copre PR e metadati remoti del repository. Branch locali, checkout e commit restano responsabilità del workspace/harness, non del MCP.
+
 ## Requisiti
 
 - Node.js 22+
@@ -52,17 +56,20 @@ MCP endpoint:
 ## Tool esposti
 
 - `list_pull_requests`
+- `find_open_pull_request`
 - `get_pull_request`
 - `get_pull_request_diff`
 - `get_pull_request_comments`
 - `add_pull_request_comment`
 - `create_pull_request`
+- `open_pull_request`
 - `bb_clone`
 - `bb_api`
 
 ## Note
 
-- `create_pull_request` e' esposto; `approve_pull_request` e `merge_pull_request` restano fuori dal surface MCP corrente e vengono rifiutati se un client prova a chiamarli direttamente
+- `create_pull_request` e `open_pull_request` condividono lo stesso contract; `open_pull_request` e' solo un alias semantico leggero
+- `approve_pull_request` e `merge_pull_request` restano fuori dal surface MCP corrente e vengono rifiutati se un client prova a chiamarli direttamente
 - `bb_api` supporta solo richieste GET
 - `bb_clone` usa `targetPath` come percorso finale esatto del clone e lo accetta solo se resta sotto `MCP_BB_CLONE_ROOT`
 - il server usa sessioni MCP streamable HTTP e logging strutturato `LLM_BB_MCP`
