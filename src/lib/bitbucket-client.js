@@ -46,6 +46,12 @@ export function assertCloneBasePathAllowed(targetPath, cloneRoot) {
     return resolvedBase;
 }
 
+export function isRepoScopedBitbucketApiPath(rawPath, workspace, repoSlug) {
+    const normalizedPath = normalizeBitbucketApiPath(rawPath);
+    const normalizedPrefix = normalizeBitbucketApiPath(`/repositories/${workspace}/${repoSlug}`);
+    return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
+}
+
 export class BitbucketClient {
     constructor({
         apiBase,
@@ -74,6 +80,13 @@ export class BitbucketClient {
 
     get defaultDestinationBranch() {
         return this._defaultDestinationBranch;
+    }
+
+    get repoScope() {
+        return {
+            workspace: this._workspace,
+            repoSlug: this._repoSlug,
+        };
     }
 
     async request(method, rawPath, { body, queryParams, accept } = {}) {
@@ -160,6 +173,9 @@ export class BitbucketClient {
 
         const ws = workspaceSlug || this._workspace;
         const dest = assertCloneBasePathAllowed(targetPath, this._cloneRoot);
+        if (fs.existsSync(dest)) {
+            throw new Error(`targetPath gia' esistente: '${dest}'. Scegli una directory nuova.`);
+        }
         fs.mkdirSync(path.dirname(dest), { recursive: true });
 
         const sshUrl = `git@bitbucket.org:${ws}/${repoSlug}.git`;
@@ -168,21 +184,40 @@ export class BitbucketClient {
         try {
             await this._execGit(["clone", sshUrl, dest]);
             return { success: true, protocol: "ssh", path: dest };
-        } catch {
-            await this._execGit(["clone", httpsUrl, dest]);
-            return { success: true, protocol: "https", path: dest };
+        } catch (sshError) {
+            try {
+                await this._execGit(["clone", httpsUrl, dest]);
+                return { success: true, protocol: "https", path: dest };
+            } catch (httpsError) {
+                throw new Error(
+                    `Clone fallito via SSH e HTTPS. SSH: ${sshError.message} HTTPS: ${httpsError.message}`,
+                    { cause: httpsError },
+                );
+            }
         }
     }
 
     _execGit(args) {
         return new Promise((resolve, reject) => {
-            execFile("git", args, { timeout: 120000 }, (error, stdout, stderr) => {
-                if (error) {
-                    reject(new Error(stderr || error.message));
-                } else {
-                    resolve(stdout);
-                }
-            });
+            execFile(
+                "git",
+                args,
+                {
+                    timeout: 120000,
+                    env: {
+                        ...process.env,
+                        GIT_TERMINAL_PROMPT: "0",
+                        GCM_INTERACTIVE: "Never",
+                    },
+                },
+                (error, stdout, stderr) => {
+                    if (error) {
+                        reject(new Error(stderr || error.message));
+                    } else {
+                        resolve(stdout);
+                    }
+                },
+            );
         });
     }
 }

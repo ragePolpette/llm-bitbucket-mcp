@@ -86,11 +86,11 @@ Notes:
 
 ### P0.3 API Boundary Hardening
 
-- [ ] Restringere `bb_api` a endpoint consentiti o a un perimetro esplicito
-- [ ] Aggiungere validazione input runtime nei tool handler
-- [ ] Introdurre limiti di lunghezza per input testuali sensibili
-- [ ] Rendere `bb_clone` piu' prevedibile e non-interactive quando possibile
-- [ ] Rivedere i default dei tool write per evitare comportamenti ambigui
+- [x] Restringere `bb_api` a endpoint consentiti o a un perimetro esplicito
+- [x] Aggiungere validazione input runtime nei tool handler
+- [x] Introdurre limiti di lunghezza per input testuali sensibili
+- [x] Rendere `bb_clone` piu' prevedibile e non-interactive quando possibile
+- [x] Rivedere i default dei tool write per evitare comportamenti ambigui
 
 Definition of done:
 
@@ -100,9 +100,9 @@ Definition of done:
 
 Notes:
 
-- branch:
-- PR:
-- merged on:
+- branch: `feature/api-boundary-hardening`
+- PR: `#7`
+- merged on: `2026-03-25`
 
 ### P0.4 Test Expansion
 

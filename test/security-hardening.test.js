@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
 import { handleToolCall } from "../src/lib/handlers.js";
 import {
     assertCloneBasePathAllowed,
+    BitbucketClient,
+    isRepoScopedBitbucketApiPath,
     normalizeBitbucketApiPath,
 } from "../src/lib/bitbucket-client.js";
 import { resolveCloneRoot } from "../src/lib/config.js";
@@ -261,6 +265,53 @@ test("bb_api rejects non-GET methods", async () => {
     );
 });
 
+test("bb_api rejects paths outside the configured repository scope", async () => {
+    const client = {
+        repoScope: { workspace: "ws", repoSlug: "repo" },
+        async request() {
+            throw new Error("should not be called");
+        },
+    };
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "bb_api",
+                { method: "GET", path: "/repositories/other/workspace/pipelines" },
+                client,
+            ),
+        /repository configurato/,
+    );
+});
+
+test("bb_api allows repo-scoped paths", async () => {
+    const calls = [];
+    const client = {
+        repoScope: { workspace: "ws", repoSlug: "repo" },
+        async request(method, path, { queryParams } = {}) {
+            calls.push({ method, path, queryParams });
+            return { values: [] };
+        },
+    };
+
+    const result = await handleToolCall(
+        "bb_api",
+        {
+            method: "GET",
+            path: "/repositories/ws/repo/pipelines",
+            queryParams: { state: "SUCCESSFUL" },
+        },
+        client,
+    );
+
+    assert.deepEqual(result, { values: [] });
+    assert.deepEqual(calls[0], {
+        method: "GET",
+        path: "/repositories/ws/repo/pipelines",
+        queryParams: { state: "SUCCESSFUL" },
+    });
+});
+
 test("bb_api normalizes Bitbucket API paths", () => {
     assert.equal(
         normalizeBitbucketApiPath("/repositories/ws/repo/pullrequests"),
@@ -269,6 +320,17 @@ test("bb_api normalizes Bitbucket API paths", () => {
     assert.equal(
         normalizeBitbucketApiPath("/2.0/repositories/ws/repo/pullrequests"),
         "/2.0/repositories/ws/repo/pullrequests",
+    );
+});
+
+test("repo scoped API path helper accepts only the configured repository", () => {
+    assert.equal(
+        isRepoScopedBitbucketApiPath("/repositories/ws/repo/pipelines", "ws", "repo"),
+        true,
+    );
+    assert.equal(
+        isRepoScopedBitbucketApiPath("/repositories/ws/other/pipelines", "ws", "repo"),
+        false,
     );
 });
 
@@ -289,7 +351,75 @@ test("clone target path is the final destination path", () => {
     assert.equal(assertCloneBasePathAllowed(finalClonePath, cloneRoot), finalClonePath);
 });
 
+test("clone target path must not already exist", async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "llm-bb-mcp-clone-"));
+    const existingTarget = path.join(tempRoot, "repo");
+    fs.mkdirSync(existingTarget, { recursive: true });
+
+    const client = new BitbucketClient({
+        apiBase: "https://api.bitbucket.org",
+        workspace: "ws",
+        repoSlug: "repo",
+        userEmail: "dev@example.com",
+        apiToken: "token",
+        requestTimeoutMs: 30000,
+        maxResponseBytes: 1024,
+        cloneRoot: tempRoot,
+        defaultDestinationBranch: "",
+    });
+
+    await assert.rejects(() => client.clone("ws", "repo", existingTarget), /gia' esistente/);
+});
+
 test("default clone root resolves under current working directory", () => {
     const cwd = "C:/workspace/llm-bitbucket-mcp";
     assert.equal(resolveCloneRoot("", cwd), path.resolve(cwd, "_clones"));
+});
+
+test("create_pull_request rejects identical source and destination branches", async () => {
+    const client = {
+        defaultDestinationBranch: "",
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            throw new Error("should not be called");
+        },
+    };
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "create_pull_request",
+                {
+                    title: "Same branch",
+                    source_branch: "main",
+                    destination_branch: "main",
+                },
+                client,
+            ),
+        /non possono coincidere/,
+    );
+});
+
+test("add_pull_request_comment requires both file_path and line_to for inline comments", async () => {
+    const client = {
+        async request() {
+            throw new Error("should not be called");
+        },
+    };
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "add_pull_request_comment",
+                {
+                    pr_id: 123,
+                    content: "Inline comment",
+                    file_path: "src/file.js",
+                },
+                client,
+            ),
+        /sia file_path sia line_to/,
+    );
 });

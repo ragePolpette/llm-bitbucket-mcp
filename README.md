@@ -72,6 +72,6 @@ MCP endpoint:
 
 - `create_pull_request` e `open_pull_request` condividono lo stesso contract; `open_pull_request` e' solo un alias semantico leggero
 - `approve_pull_request` e `merge_pull_request` restano fuori dal surface MCP corrente e vengono rifiutati se un client prova a chiamarli direttamente
-- `bb_api` supporta solo richieste GET
-- `bb_clone` usa `targetPath` come percorso finale esatto del clone e lo accetta solo se resta sotto `MCP_BB_CLONE_ROOT`
+- `bb_api` supporta solo richieste GET e solo dentro il repository configurato
+- `bb_clone` usa `targetPath` come percorso finale esatto del clone, lo accetta solo se resta sotto `MCP_BB_CLONE_ROOT` e richiede una directory nuova
 - il server usa sessioni MCP streamable HTTP e logging strutturato `LLM_BB_MCP`
