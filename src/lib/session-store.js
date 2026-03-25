@@ -17,7 +17,7 @@ export function createSessionStore({ ttlMs = 30 * 60 * 1000 } = {}) {
         prune(now);
         sessions.set(sessionId, {
             transport,
-            expiresAt: ttlEnabled ? now + ttlMs : Number.POSITIVE_INFINITY
+            expiresAt: ttlEnabled ? now + ttlMs : Number.POSITIVE_INFINITY,
         });
     }
 
@@ -45,6 +45,6 @@ export function createSessionStore({ ttlMs = 30 * 60 * 1000 } = {}) {
         size() {
             prune();
             return sessions.size;
-        }
+        },
     };
 }
