@@ -4,39 +4,102 @@ import * as logger from "./logger.js";
 
 export async function handleToolCall(name, args, client) {
     switch (name) {
+        case "bitbucket_info":           return handleBitbucketInfo(client);
         case "list_pull_requests":        return handleListPRs(args, client);
+        case "find_open_pull_request":    return handleFindOpenPR(args, client);
         case "get_pull_request":          return handleGetPR(args, client);
         case "get_pull_request_diff":     return handleGetPRDiff(args, client);
         case "get_pull_request_comments": return handleGetPRComments(args, client);
         case "add_pull_request_comment":  return handleAddPRComment(args, client);
         case "create_pull_request":       return handleCreatePR(args, client);
+        case "open_pull_request":         return handleCreatePR(args, client);
         case "bb_clone":                  return handleClone(args, client);
         case "bb_api":                    return handleGenericApi(args, client);
         default: throw new Error(`Tool non supportato: ${name}`);
     }
 }
 
+function handleBitbucketInfo(client) {
+    return {
+        server: "llm-bitbucket-mcp",
+        purpose: "Bitbucket Cloud MCP focalizzato su PR, read API e clone workspace-aware.",
+        tool_map: {
+            discovery: [
+                "bitbucket_info",
+                "list_pull_requests",
+                "find_open_pull_request",
+                "get_pull_request",
+                "get_pull_request_diff",
+                "get_pull_request_comments"
+            ],
+            pr_write: [
+                "create_pull_request",
+                "open_pull_request",
+                "add_pull_request_comment"
+            ],
+            utility: ["bb_clone", "bb_api"]
+        },
+        usage_notes: {
+            find_open_pull_request:
+                "Usa source_branch esatto; destination_branch e' opzionale ma consigliato per evitare ambiguita.",
+            create_pull_request:
+                "Richiede title e source_branch. destination_branch puo' arrivare dal payload oppure da BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
+            open_pull_request:
+                "Alias ergonomico di create_pull_request con lo stesso contract.",
+            bb_api:
+                "Solo GET read-only per endpoint non coperti dai tool semantici.",
+            bb_clone:
+                "Clona dentro la clone root configurata; targetPath deve restare sotto quella root."
+        },
+        runtime_options: {
+            default_destination_branch_configured: Boolean(client.defaultDestinationBranch),
+            default_destination_branch: client.defaultDestinationBranch || null
+        },
+        boundaries: [
+            "Gestisce operazioni Bitbucket remote e clone locale controllato.",
+            "Non espone checkout_branch o create_commit del workspace locale.",
+            "Per git locale usare l'harness o un eventuale MCP git dedicato."
+        ]
+    };
+}
+
 // ── PR read handlers ─────────────────────────────────────────────
 
 async function handleListPRs(args, client) {
-    const qp = {};
-    if (args.state) qp.state = args.state;
-    if (args.source_branch) qp.q = `source.branch.name="${args.source_branch}"`;
-    if (args.page) qp.page = String(args.page);
-    qp.pagelen = String(args.pagelen || 25);
-
-    logger.logApiCall("GET", "pullrequests", "list_pull_requests", "in", { state: args.state || "OPEN" });
-    const result = await client.request("GET", client.repoPath("pullrequests"), { queryParams: qp });
-    logger.logApiCall("GET", "pullrequests", "list_pull_requests", "out", {
-        success: true, result_count: result.size, has_results: (result.size || 0) > 0
-    });
-
+    const result = await listPullRequests(args, client);
     return {
         count: result.size,
         page: result.page,
         pull_requests: (result.values || []).map(mapPrSummary)
     };
 }
+
+async function handleFindOpenPR(args, client) {
+    requireParam(args, "source_branch");
+
+    const queryArgs = {
+        state: "OPEN",
+        source_branch: args.source_branch,
+        destination_branch: args.destination_branch,
+        pagelen: args.pagelen || 50
+    };
+
+    let page = 1;
+    while (true) {
+        const result = await listPullRequests({ ...queryArgs, page }, client);
+        const match = (result.values || []).find(pr => isExactOpenMatch(pr, args));
+        if (match) {
+            return { pull_request: mapPrSummary(match) };
+        }
+        if (!result.next) {
+            return { pull_request: null };
+        }
+        const nextUrl = new URL(result.next);
+        const nextPage = Number(nextUrl.searchParams.get("page"));
+        page = Number.isFinite(nextPage) && nextPage > 0 ? nextPage : page + 1;
+    }
+}
+
 
 async function handleGetPR(args, client) {
     requireParam(args, "pr_id");
@@ -242,6 +305,40 @@ async function handleGenericApi(args, client) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+async function listPullRequests(args, client) {
+    const qp = {};
+    if (args.state) qp.state = args.state;
+    const query = buildPullRequestQuery(args.source_branch, args.destination_branch);
+    if (query) qp.q = query;
+    if (args.page) qp.page = String(args.page);
+    qp.pagelen = String(args.pagelen || 25);
+
+    logger.logApiCall("GET", "pullrequests", "list_pull_requests", "in", { state: args.state || "OPEN" });
+    const result = await client.request("GET", client.repoPath("pullrequests"), { queryParams: qp });
+    logger.logApiCall("GET", "pullrequests", "list_pull_requests", "out", {
+        success: true, result_count: result.size, has_results: (result.size || 0) > 0
+    });
+
+    return result;
+}
+
+function buildPullRequestQuery(sourceBranch, destinationBranch) {
+    const clauses = [];
+    if (sourceBranch) clauses.push("source.branch.name=\"" + escapeQueryValue(sourceBranch) + "\"");
+    if (destinationBranch) clauses.push("destination.branch.name=\"" + escapeQueryValue(destinationBranch) + "\"");
+    return clauses.join(" AND ");
+}
+
+function escapeQueryValue(value) {
+    return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\"');
+}
+
+function isExactOpenMatch(pr, args) {
+    return pr.state === "OPEN"
+        && pr.source?.branch?.name === args.source_branch
+        && (args.destination_branch ? pr.destination?.branch?.name === args.destination_branch : true);
+}
 
 function requireParam(args, name) {
     if (args[name] === undefined || args[name] === null || args[name] === "") {

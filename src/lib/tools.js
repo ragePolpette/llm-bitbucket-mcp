@@ -7,6 +7,15 @@
  */
 
 export const TOOLS = [
+    {
+        name: "bitbucket_info",
+        description: "Mappa tool, boundary operativi e opzioni runtime del server Bitbucket MCP.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {}
+        }
+    },
     // ── PR read tools ────────────────────────────────────────────
     {
         name: "list_pull_requests",
@@ -36,6 +45,25 @@ export const TOOLS = [
                     description: "Risultati per pagina (max 50). Default: 25."
                 }
             }
+        }
+    },
+    {
+        name: "find_open_pull_request",
+        description: "Trova una pull request aperta per branch sorgente esatto e, opzionalmente, branch di destinazione.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                source_branch: {
+                    type: "string",
+                    description: "Branch sorgente da cercare (match esatto)."
+                },
+                destination_branch: {
+                    type: "string",
+                    description: "Branch di destinazione da filtrare. Opzionale."
+                }
+            },
+            required: ["source_branch"]
         }
     },
     {
@@ -103,7 +131,33 @@ export const TOOLS = [
                 description: { type: "string", description: "Descrizione Markdown della PR." },
                 destination_branch: {
                     type: "string",
-                    description: "Branch destinazione. Default: BPOFH."
+                    description: "Branch destinazione. Se omesso usa BITBUCKET_DEFAULT_DESTINATION_BRANCH; se assente fallisce."
+                },
+                reviewers: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "UUID Bitbucket dei reviewer."
+                },
+                close_source_branch: {
+                    type: "boolean",
+                    description: "Chiudi il branch sorgente dopo il merge. Default: true."
+                }
+            },
+            required: ["title", "source_branch"]
+        }
+    },    {
+        name: "open_pull_request",
+        description: "Alias ergonomico di create_pull_request, con lo stesso contract e la stessa logica di creazione.",
+        annotations: { readOnlyHint: false, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                title: { type: "string", description: "Titolo della PR." },
+                source_branch: { type: "string", description: "Branch sorgente." },
+                description: { type: "string", description: "Descrizione Markdown della PR." },
+                destination_branch: {
+                    type: "string",
+                    description: "Branch destinazione. Se omesso usa BITBUCKET_DEFAULT_DESTINATION_BRANCH; se assente fallisce."
                 },
                 reviewers: {
                     type: "array",
@@ -118,6 +172,7 @@ export const TOOLS = [
             required: ["title", "source_branch"]
         }
     },
+
 
     // ── Utility tools ────────────────────────────────────────────
     {
