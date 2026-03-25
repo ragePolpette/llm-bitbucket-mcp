@@ -16,7 +16,7 @@ const FRIENDLY_ERRORS = {
     401: "Auth failed. Verifica BITBUCKET_USER_EMAIL / BITBUCKET_API_TOKEN.",
     403: "Permission denied. Verifica scope API Token (Repositories: Read, Pull requests: Read+Write).",
     404: "Risorsa non trovata.",
-    429: "Rate limited da Bitbucket. Riprova tra qualche secondo."
+    429: "Rate limited da Bitbucket. Riprova tra qualche secondo.",
 };
 
 export function normalizeBitbucketApiPath(rawPath) {
@@ -40,14 +40,24 @@ export function assertCloneBasePathAllowed(targetPath, cloneRoot) {
     const resolvedRoot = path.resolve(cloneRoot);
     if (!isPathWithinRoot(resolvedBase, resolvedRoot)) {
         throw new Error(
-            `targetPath non consentito: deve restare sotto la clone root configurata (${resolvedRoot}).`
+            `targetPath non consentito: deve restare sotto la clone root configurata (${resolvedRoot}).`,
         );
     }
     return resolvedBase;
 }
 
 export class BitbucketClient {
-    constructor({ apiBase, workspace, repoSlug, userEmail, apiToken, requestTimeoutMs, maxResponseBytes, cloneRoot, defaultDestinationBranch }) {
+    constructor({
+        apiBase,
+        workspace,
+        repoSlug,
+        userEmail,
+        apiToken,
+        requestTimeoutMs,
+        maxResponseBytes,
+        cloneRoot,
+        defaultDestinationBranch,
+    }) {
         this._apiBase = apiBase;
         this._workspace = workspace;
         this._repoSlug = repoSlug;
@@ -79,7 +89,7 @@ export class BitbucketClient {
 
         const headers = {
             Authorization: this._authHeader,
-            Accept: accept || "application/json"
+            Accept: accept || "application/json",
         };
         const fetchOptions = { method, headers };
 
@@ -98,7 +108,9 @@ export class BitbucketClient {
         } catch (err) {
             clearTimeout(timer);
             if (err.name === "AbortError") {
-                throw new BitbucketApiError(0, "Timeout", { error: `Request timeout dopo ${this._timeoutMs}ms.` });
+                throw new BitbucketApiError(0, "Timeout", {
+                    error: `Request timeout dopo ${this._timeoutMs}ms.`,
+                });
             }
             throw new BitbucketApiError(0, "NetworkError", { error: err.message });
         } finally {
@@ -141,7 +153,9 @@ export class BitbucketClient {
             throw new Error(`repoSlug non valido: '${repoSlug}'. Pattern: ${slugPattern}`);
         }
         if (workspaceSlug && !slugPattern.test(workspaceSlug)) {
-            throw new Error(`workspaceSlug non valido: '${workspaceSlug}'. Pattern: ${slugPattern}`);
+            throw new Error(
+                `workspaceSlug non valido: '${workspaceSlug}'. Pattern: ${slugPattern}`,
+            );
         }
 
         const ws = workspaceSlug || this._workspace;

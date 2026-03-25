@@ -3,22 +3,29 @@ import assert from "node:assert/strict";
 import path from "node:path";
 
 import { handleToolCall } from "../src/lib/handlers.js";
-import { assertCloneBasePathAllowed, normalizeBitbucketApiPath } from "../src/lib/bitbucket-client.js";
+import {
+    assertCloneBasePathAllowed,
+    normalizeBitbucketApiPath,
+} from "../src/lib/bitbucket-client.js";
 import { resolveCloneRoot } from "../src/lib/config.js";
 
 test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
         () => handleToolCall("approve_pull_request", { pr_id: 123 }, {}),
-        /Tool non supportato/
+        /Tool non supportato/,
     );
     await assert.rejects(
         () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}),
-        /Tool non supportato/
+        /Tool non supportato/,
     );
 });
 
 test("bitbucket_info exposes tool map and runtime branch semantics", async () => {
-    const result = await handleToolCall("bitbucket_info", {}, { defaultDestinationBranch: "develop" });
+    const result = await handleToolCall(
+        "bitbucket_info",
+        {},
+        { defaultDestinationBranch: "develop" },
+    );
 
     assert.equal(result.server, "llm-bitbucket-mcp");
     assert.ok(result.tool_map.discovery.includes("find_open_pull_request"));
@@ -35,8 +42,12 @@ test("create_pull_request is dispatched when explicitly exposed", async () => {
         },
         async request(method, path, { body } = {}) {
             requests.push({ method, path, body });
-            return { id: 77, title: body.title, links: { html: { href: "https://bitbucket/pr/77" } } };
-        }
+            return {
+                id: 77,
+                title: body.title,
+                links: { html: { href: "https://bitbucket/pr/77" } },
+            };
+        },
     };
 
     const result = await handleToolCall(
@@ -47,9 +58,9 @@ test("create_pull_request is dispatched when explicitly exposed", async () => {
             description: "Descrizione",
             destination_branch: "main",
             reviewers: ["{reviewer-uuid}"],
-            close_source_branch: false
+            close_source_branch: false,
         },
-        client
+        client,
     );
 
     assert.equal(requests.length, 1);
@@ -62,15 +73,15 @@ test("create_pull_request is dispatched when explicitly exposed", async () => {
             destination: { branch: { name: "main" } },
             close_source_branch: false,
             description: "Descrizione",
-            reviewers: [{ uuid: "{reviewer-uuid}" }]
-        }
+            reviewers: [{ uuid: "{reviewer-uuid}" }],
+        },
     });
     assert.deepEqual(result, {
         id: 77,
         title: "Nuova PR",
         link: "https://bitbucket/pr/77",
         source_branch: "feature/test",
-        destination_branch: "main"
+        destination_branch: "main",
     });
 });
 
@@ -96,28 +107,28 @@ test("find_open_pull_request returns the matching open PR summary", async () => 
                         created_on: "2026-03-25T10:00:00Z",
                         updated_on: "2026-03-25T11:00:00Z",
                         comment_count: 3,
-                        links: { html: { href: "https://bitbucket/pr/11" } }
-                    }
-                ]
+                        links: { html: { href: "https://bitbucket/pr/11" } },
+                    },
+                ],
             };
-        }
+        },
     };
 
     const result = await handleToolCall(
         "find_open_pull_request",
         {
             source_branch: "feature/match",
-            destination_branch: "main"
+            destination_branch: "main",
         },
-        client
+        client,
     );
 
     assert.equal(requests.length, 1);
     assert.deepEqual(requests[0].queryParams, {
         state: "OPEN",
-        q: "source.branch.name=\"feature/match\" AND destination.branch.name=\"main\"",
+        q: 'source.branch.name="feature/match" AND destination.branch.name="main"',
         page: "1",
-        pagelen: "50"
+        pagelen: "50",
     });
     assert.deepEqual(result, {
         pull_request: {
@@ -130,8 +141,8 @@ test("find_open_pull_request returns the matching open PR summary", async () => 
             created_on: "2026-03-25T10:00:00Z",
             updated_on: "2026-03-25T11:00:00Z",
             comment_count: 3,
-            link: "https://bitbucket/pr/11"
-        }
+            link: "https://bitbucket/pr/11",
+        },
     });
 });
 
@@ -142,15 +153,15 @@ test("find_open_pull_request returns null when no open PR matches", async () => 
         },
         async request() {
             return { size: 0, page: 1, values: [] };
-        }
+        },
     };
 
     const result = await handleToolCall(
         "find_open_pull_request",
         {
-            source_branch: "feature/missing"
+            source_branch: "feature/missing",
         },
-        client
+        client,
     );
 
     assert.deepEqual(result, { pull_request: null });
@@ -165,8 +176,12 @@ test("open_pull_request is a thin alias for create_pull_request", async () => {
         },
         async request(method, path, { body } = {}) {
             requests.push({ method, path, body });
-            return { id: 91, title: body.title, links: { html: { href: "https://bitbucket/pr/91" } } };
-        }
+            return {
+                id: 91,
+                title: body.title,
+                links: { html: { href: "https://bitbucket/pr/91" } },
+            };
+        },
     };
 
     const result = await handleToolCall(
@@ -174,9 +189,9 @@ test("open_pull_request is a thin alias for create_pull_request", async () => {
         {
             title: "Alias PR",
             source_branch: "feature/alias",
-            destination_branch: "main"
+            destination_branch: "main",
         },
-        client
+        client,
     );
 
     assert.equal(requests.length, 1);
@@ -192,17 +207,21 @@ test("create_pull_request uses configured default destination branch when omitte
             return `/repositories/ws/repo/${path}`;
         },
         async request(_method, _path, { body } = {}) {
-            return { id: 88, title: body.title, links: { html: { href: "https://bitbucket/pr/88" } } };
-        }
+            return {
+                id: 88,
+                title: body.title,
+                links: { html: { href: "https://bitbucket/pr/88" } },
+            };
+        },
     };
 
     const result = await handleToolCall(
         "create_pull_request",
         {
             title: "PR default branch",
-            source_branch: "feature/default"
+            source_branch: "feature/default",
         },
-        client
+        client,
     );
 
     assert.equal(result.destination_branch, "develop");
@@ -216,30 +235,40 @@ test("create_pull_request fails without explicit or configured destination branc
         },
         async request() {
             throw new Error("should not be called");
-        }
+        },
     };
 
     await assert.rejects(
-        () => handleToolCall("create_pull_request", { title: "No target", source_branch: "feature/x" }, client),
-        /destination_branch/
+        () =>
+            handleToolCall(
+                "create_pull_request",
+                { title: "No target", source_branch: "feature/x" },
+                client,
+            ),
+        /destination_branch/,
     );
 });
 
 test("bb_api rejects non-GET methods", async () => {
     await assert.rejects(
-        () => handleToolCall("bb_api", { method: "POST", path: "/repositories/ws/repo/pipelines" }, {}),
-        /solo richieste read-only GET/
+        () =>
+            handleToolCall(
+                "bb_api",
+                { method: "POST", path: "/repositories/ws/repo/pipelines" },
+                {},
+            ),
+        /solo richieste read-only GET/,
     );
 });
 
 test("bb_api normalizes Bitbucket API paths", () => {
     assert.equal(
         normalizeBitbucketApiPath("/repositories/ws/repo/pullrequests"),
-        "/2.0/repositories/ws/repo/pullrequests"
+        "/2.0/repositories/ws/repo/pullrequests",
     );
     assert.equal(
         normalizeBitbucketApiPath("/2.0/repositories/ws/repo/pullrequests"),
-        "/2.0/repositories/ws/repo/pullrequests"
+        "/2.0/repositories/ws/repo/pullrequests",
     );
 });
 
@@ -250,7 +279,7 @@ test("clone target path must stay within configured clone root", () => {
 
     assert.throws(
         () => assertCloneBasePathAllowed("C:/tmp/outside", cloneRoot),
-        /clone root configurata/
+        /clone root configurata/,
     );
 });
 
@@ -262,8 +291,5 @@ test("clone target path is the final destination path", () => {
 
 test("default clone root resolves under current working directory", () => {
     const cwd = "C:/workspace/llm-bitbucket-mcp";
-    assert.equal(
-        resolveCloneRoot("", cwd),
-        path.resolve(cwd, "_clones")
-    );
+    assert.equal(resolveCloneRoot("", cwd), path.resolve(cwd, "_clones"));
 });
