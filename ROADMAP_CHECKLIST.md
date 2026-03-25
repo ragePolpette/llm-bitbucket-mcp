@@ -125,11 +125,11 @@ Notes:
 
 ### P0.5 README And Portfolio Polish
 
-- [ ] Riscrivere README con overview architetturale
-- [ ] Documentare chiaramente scope, boundary e non-goals
-- [ ] Aggiungere esempi di uso reali dei tool MCP
-- [ ] Documentare security posture proporzionata a tool locale/internal
-- [ ] Aggiungere sezione roadmap che punti a questo file
+- [x] Riscrivere README con overview architetturale
+- [x] Documentare chiaramente scope, boundary e non-goals
+- [x] Aggiungere esempi di uso reali dei tool MCP
+- [x] Documentare security posture proporzionata a tool locale/internal
+- [x] Aggiungere sezione roadmap che punti a questo file
 
 Definition of done:
 
@@ -138,9 +138,9 @@ Definition of done:
 
 Notes:
 
-- branch:
-- PR:
-- merged on:
+- branch: `feature/readme-portfolio-polish`
+- PR: `#9`
+- merged on: `2026-03-25`
 
 ## Phase P1: Should Have For Internal Team Use
 
