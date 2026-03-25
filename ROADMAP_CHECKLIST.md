@@ -61,7 +61,7 @@ Definition of done:
 Notes:
 
 - branch: `feature/quality-baseline`
-- PR:
+- PR: `#5`
 - merged on:
 
 ### P0.2 Config And Runtime Hardening
