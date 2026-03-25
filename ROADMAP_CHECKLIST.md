@@ -121,7 +121,7 @@ Notes:
 
 - branch: `feature/test-expansion`
 - PR: `#8`
-- merged on:
+- merged on: `2026-03-25`
 
 ### P0.5 README And Portfolio Polish
 
