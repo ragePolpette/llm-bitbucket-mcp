@@ -139,7 +139,7 @@ Definition of done:
 Notes:
 
 - branch: `feature/readme-portfolio-polish`
-- PR:
+- PR: `#9`
 - merged on:
 
 ## Phase P1: Should Have For Internal Team Use
