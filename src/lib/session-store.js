@@ -1,6 +1,15 @@
-export function createSessionStore({ ttlMs = 30 * 60 * 1000 } = {}) {
+export class SessionStoreCapacityError extends Error {
+    constructor(maxSessions) {
+        super(`Limite sessioni raggiunto: massimo ${maxSessions} sessioni attive.`);
+        this.name = "SessionStoreCapacityError";
+        this.status = 503;
+    }
+}
+
+export function createSessionStore({ ttlMs = 30 * 60 * 1000, maxSessions = 100 } = {}) {
     const sessions = new Map();
     const ttlEnabled = Number(ttlMs) > 0;
+    const capacity = Number(maxSessions) > 0 ? Number(maxSessions) : 100;
 
     function prune(now = Date.now()) {
         if (!ttlEnabled) {
@@ -15,6 +24,9 @@ export function createSessionStore({ ttlMs = 30 * 60 * 1000 } = {}) {
 
     function set(sessionId, transport, now = Date.now()) {
         prune(now);
+        if (!sessions.has(sessionId) && sessions.size >= capacity) {
+            throw new SessionStoreCapacityError(capacity);
+        }
         sessions.set(sessionId, {
             transport,
             expiresAt: ttlEnabled ? now + ttlMs : Number.POSITIVE_INFINITY,
@@ -42,9 +54,12 @@ export function createSessionStore({ ttlMs = 30 * 60 * 1000 } = {}) {
         get,
         delete: deleteSession,
         prune,
-        size() {
-            prune();
+        size(now = Date.now()) {
+            prune(now);
             return sessions.size;
+        },
+        maxSessions() {
+            return capacity;
         },
     };
 }
