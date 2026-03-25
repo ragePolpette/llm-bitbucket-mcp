@@ -82,7 +82,7 @@ Notes:
 
 - branch: `feature/config-runtime-hardening`
 - PR: `#6`
-- merged on:
+- merged on: `2026-03-25`
 
 ### P0.3 API Boundary Hardening
 
