@@ -36,6 +36,8 @@ Nota:
 - `BITBUCKET_API_TOKEN` non deve stare nel `.env`
 - il server rifiuta l'avvio se trova il token nel file `.env`
 - il token va passato solo a runtime, per esempio dalla dashboard
+- `MCP_BB_SESSION_TTL_MS` ha default sicuro a 30 minuti
+- `MCP_BB_MAX_SESSIONS` limita le sessioni attive in memoria
 - `MCP_BB_CLONE_ROOT` puo' definire la root autorizzata per i clone; se assente usa `_clones` sotto la root del progetto
 - `BITBUCKET_DEFAULT_DESTINATION_BRANCH` puo' definire il branch di destinazione di default per `create_pull_request`; se assente va passato ogni volta al tool
 
