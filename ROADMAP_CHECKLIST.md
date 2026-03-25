@@ -140,7 +140,7 @@ Notes:
 
 - branch: `feature/readme-portfolio-polish`
 - PR: `#9`
-- merged on:
+- merged on: `2026-03-25`
 
 ## Phase P1: Should Have For Internal Team Use
 
