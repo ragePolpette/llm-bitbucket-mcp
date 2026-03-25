@@ -101,7 +101,7 @@ Definition of done:
 Notes:
 
 - branch: `feature/api-boundary-hardening`
-- PR:
+- PR: `#7`
 - merged on:
 
 ### P0.4 Test Expansion
