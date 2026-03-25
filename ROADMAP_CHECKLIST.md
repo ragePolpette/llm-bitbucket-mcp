@@ -62,7 +62,7 @@ Notes:
 
 - branch: `feature/quality-baseline`
 - PR: `#5`
-- merged on:
+- merged on: `2026-03-25`
 
 ### P0.2 Config And Runtime Hardening
 
