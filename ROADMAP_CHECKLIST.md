@@ -102,7 +102,7 @@ Notes:
 
 - branch: `feature/api-boundary-hardening`
 - PR: `#7`
-- merged on:
+- merged on: `2026-03-25`
 
 ### P0.4 Test Expansion
 
