@@ -66,11 +66,11 @@ Notes:
 
 ### P0.2 Config And Runtime Hardening
 
-- [ ] Validare la config all'avvio con schema esplicito
-- [ ] Rendere `MCP_BB_SESSION_TTL_MS` sicuro di default
-- [ ] Introdurre un limite massimo alle sessioni in memoria
-- [ ] Ridurre il payload del `/health`
-- [ ] Migliorare messaggi di errore di startup e configurazione
+- [x] Validare la config all'avvio con schema esplicito
+- [x] Rendere `MCP_BB_SESSION_TTL_MS` sicuro di default
+- [x] Introdurre un limite massimo alle sessioni in memoria
+- [x] Ridurre il payload del `/health`
+- [x] Migliorare messaggi di errore di startup e configurazione
 
 Definition of done:
 
@@ -80,9 +80,9 @@ Definition of done:
 
 Notes:
 
-- branch:
-- PR:
-- merged on:
+- branch: `feature/config-runtime-hardening`
+- PR: `#6`
+- merged on: `2026-03-25`
 
 ### P0.3 API Boundary Hardening
 

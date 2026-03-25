@@ -2,10 +2,14 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-function toInt(value, fallback) {
-    const parsed = parseInt(value, 10);
-    return Number.isNaN(parsed) ? fallback : parsed;
-}
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const MIN_REQUEST_TIMEOUT_MS = 5000;
+const MAX_REQUEST_TIMEOUT_MS = 120000;
+const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_SESSIONS = 100;
+const DEFAULT_PORT = 8783;
+const MAX_PORT = 65535;
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 function toBool(value, fallback = false) {
     if (value === undefined || value === null || value === "") return fallback;
@@ -103,53 +107,152 @@ function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
     }
 }
 
-export function getConfig() {
-    loadDotEnvFromCwd({
-        forbiddenKeys: ["BITBUCKET_API_TOKEN"],
-    });
-    const localFallback = getLocalHostFallback();
+function readTrimmed(env, key, fallback = "") {
+    return String(env[key] ?? fallback).trim();
+}
 
-    const userEmail = String(process.env.BITBUCKET_USER_EMAIL || "").trim();
-    const apiToken = String(process.env.BITBUCKET_API_TOKEN || "").trim();
+function readRequiredTrimmed(env, key, errors, message) {
+    const value = readTrimmed(env, key);
+    if (!value) {
+        errors.push(message || `${key} e' obbligatorio.`);
+    }
+    return value;
+}
+
+function readBoundedInt(env, key, { fallback, min, max, errors, label }) {
+    const raw = env[key];
+    if (raw === undefined || raw === null || raw === "") {
+        return fallback;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed)) {
+        errors.push(`${label || key} deve essere un intero.`);
+        return fallback;
+    }
+    if (parsed < min || parsed > max) {
+        errors.push(`${label || key} deve essere compreso tra ${min} e ${max}.`);
+        return fallback;
+    }
+    return parsed;
+}
+
+function readPositiveInt(env, key, { fallback, min = 1, max, errors, label }) {
+    return readBoundedInt(env, key, { fallback, min, max, errors, label });
+}
+
+function validateServerPath(pathValue, errors) {
+    if (!pathValue.startsWith("/")) {
+        errors.push("MCP_BB_PATH deve iniziare con '/'.");
+    }
+}
+
+function validateAllowedList(list, key, errors) {
+    if (!list.length) {
+        errors.push(`${key} deve contenere almeno un valore.`);
+    }
+}
+
+function validateEmail(value, key, errors) {
+    if (!value.includes("@")) {
+        errors.push(`${key} deve essere un indirizzo email valido.`);
+    }
+}
+
+export function getConfigFromEnv(env = process.env) {
+    const localFallback = getLocalHostFallback();
+    const errors = [];
+
+    const userEmail = readRequiredTrimmed(
+        env,
+        "BITBUCKET_USER_EMAIL",
+        errors,
+        "BITBUCKET_USER_EMAIL e' obbligatorio.",
+    );
+    const apiToken = readRequiredTrimmed(
+        env,
+        "BITBUCKET_API_TOKEN",
+        errors,
+        "BITBUCKET_API_TOKEN e' obbligatorio e deve essere fornito solo a runtime.",
+    );
+    if (userEmail) {
+        validateEmail(userEmail, "BITBUCKET_USER_EMAIL", errors);
+    }
     if (!userEmail || !apiToken) {
-        throw new Error(
-            "BITBUCKET_USER_EMAIL e BITBUCKET_API_TOKEN sono obbligatori.\n" +
-                "  - BITBUCKET_USER_EMAIL: inserisci nel .env o come env var.\n" +
-                "  - BITBUCKET_API_TOKEN: deve essere fornito solo a runtime (mai nel .env). Usa la dashboard.",
+        errors.push(
+            "BITBUCKET_USER_EMAIL va inserito nel .env o come env var; BITBUCKET_API_TOKEN va passato solo a runtime.",
         );
+    }
+
+    const sessionTtlMs = readBoundedInt(env, "MCP_BB_SESSION_TTL_MS", {
+        fallback: DEFAULT_SESSION_TTL_MS,
+        min: 60000,
+        max: 24 * 60 * 60 * 1000,
+        errors,
+        label: "MCP_BB_SESSION_TTL_MS",
+    });
+    const maxSessions = readPositiveInt(env, "MCP_BB_MAX_SESSIONS", {
+        fallback: DEFAULT_MAX_SESSIONS,
+        min: 1,
+        max: 1000,
+        errors,
+        label: "MCP_BB_MAX_SESSIONS",
+    });
+    const requestTimeoutMs = readBoundedInt(env, "MCP_BB_REQUEST_TIMEOUT_MS", {
+        fallback: DEFAULT_REQUEST_TIMEOUT_MS,
+        min: MIN_REQUEST_TIMEOUT_MS,
+        max: MAX_REQUEST_TIMEOUT_MS,
+        errors,
+        label: "MCP_BB_REQUEST_TIMEOUT_MS",
+    });
+    const port = readPositiveInt(env, "MCP_BB_PORT", {
+        fallback: DEFAULT_PORT,
+        min: 1,
+        max: MAX_PORT,
+        errors,
+        label: "MCP_BB_PORT",
+    });
+
+    const allowedHosts = parseCsvList(env.MCP_BB_ALLOWED_HOSTS, localFallback.allowedHosts);
+    const allowedOrigins = parseCsvList(env.MCP_BB_ALLOWED_ORIGINS, localFallback.allowedOrigins);
+    const serverPath = readTrimmed(env, "MCP_BB_PATH", "/mcp") || "/mcp";
+
+    validateAllowedList(allowedHosts, "MCP_BB_ALLOWED_HOSTS", errors);
+    validateAllowedList(allowedOrigins, "MCP_BB_ALLOWED_ORIGINS", errors);
+    validateServerPath(serverPath, errors);
+
+    if (errors.length) {
+        throw new Error(`Configurazione non valida:\n- ${errors.join("\n- ")}`);
     }
 
     return {
         bitbucket: {
             userEmail,
             apiToken,
-            workspace: String(process.env.BITBUCKET_WORKSPACE || "studioboost").trim(),
-            repoSlug: String(process.env.BITBUCKET_REPO_SLUG || "bpopilot").trim(),
-            defaultDestinationBranch: String(
-                process.env.BITBUCKET_DEFAULT_DESTINATION_BRANCH || "",
-            ).trim(),
+            workspace: readTrimmed(env, "BITBUCKET_WORKSPACE", "studioboost"),
+            repoSlug: readTrimmed(env, "BITBUCKET_REPO_SLUG", "bpopilot"),
+            defaultDestinationBranch: readTrimmed(env, "BITBUCKET_DEFAULT_DESTINATION_BRANCH"),
             apiBase: "https://api.bitbucket.org",
         },
-        requestTimeoutMs: Math.max(
-            5000,
-            Math.min(toInt(process.env.MCP_BB_REQUEST_TIMEOUT_MS, 30000), 120000),
-        ),
-        maxResponseBytes: 5 * 1024 * 1024,
-        sessionTtlMs: Math.max(0, toInt(process.env.MCP_BB_SESSION_TTL_MS, 0)),
-        cloneRoot: resolveCloneRoot(process.env.MCP_BB_CLONE_ROOT),
+        requestTimeoutMs,
+        maxResponseBytes: MAX_RESPONSE_BYTES,
+        sessionTtlMs,
+        maxSessions,
+        cloneRoot: resolveCloneRoot(env.MCP_BB_CLONE_ROOT),
         server: {
-            host: process.env.MCP_BB_HOST || "127.0.0.1",
-            port: Math.max(1, Math.min(toInt(process.env.MCP_BB_PORT, 8783), 65535)),
-            path: process.env.MCP_BB_PATH || "/mcp",
-            sseEnabled: toBool(process.env.MCP_BB_SSE_ENABLED, false),
-            allowedHosts: parseCsvList(
-                process.env.MCP_BB_ALLOWED_HOSTS,
-                localFallback.allowedHosts,
-            ),
-            allowedOrigins: parseCsvList(
-                process.env.MCP_BB_ALLOWED_ORIGINS,
-                localFallback.allowedOrigins,
-            ),
+            host: readTrimmed(env, "MCP_BB_HOST", "127.0.0.1") || "127.0.0.1",
+            port,
+            path: serverPath,
+            sseEnabled: toBool(env.MCP_BB_SSE_ENABLED, false),
+            allowedHosts,
+            allowedOrigins,
         },
     };
+}
+
+export function getConfig() {
+    loadDotEnvFromCwd({
+        forbiddenKeys: ["BITBUCKET_API_TOKEN"],
+    });
+    return getConfigFromEnv(process.env);
 }

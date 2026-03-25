@@ -14,21 +14,7 @@ import { handleToolCall } from "./lib/handlers.js";
 import * as logger from "./lib/logger.js";
 import { createSessionStore } from "./lib/session-store.js";
 import { applyJsonAcceptCompatibility } from "./lib/accept-compat.js";
-
-const config = getConfig();
-const sessions = createSessionStore({ ttlMs: config.sessionTtlMs });
-
-const client = new BitbucketClient({
-    apiBase: config.bitbucket.apiBase,
-    workspace: config.bitbucket.workspace,
-    repoSlug: config.bitbucket.repoSlug,
-    userEmail: config.bitbucket.userEmail,
-    apiToken: config.bitbucket.apiToken,
-    defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
-    requestTimeoutMs: config.requestTimeoutMs,
-    maxResponseBytes: config.maxResponseBytes,
-    cloneRoot: config.cloneRoot,
-});
+import { buildHealthPayload } from "./lib/health.js";
 
 function asTextResult(payload) {
     return {
@@ -36,7 +22,7 @@ function asTextResult(payload) {
     };
 }
 
-function createMcpServer() {
+function createMcpServer(client) {
     const server = new Server(
         { name: "llm-bitbucket-mcp", version: "1.0.0" },
         { capabilities: { tools: {} } },
@@ -111,7 +97,7 @@ function isOriginAllowed(origin, allowedOrigins) {
     return false;
 }
 
-function withOriginValidation(req, res, next) {
+function withOriginValidation(req, res, next, config) {
     const origin = normalizeHeaderValue(req.headers.origin);
     if (!origin) {
         next();
@@ -145,141 +131,166 @@ function sendUnknownSession(res) {
     res.status(404).json(createErrorResponse("Not Found: Invalid or expired session ID"));
 }
 
-const app = createMcpExpressApp({
-    host: config.server.host,
-    allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
-});
-
-app.use(withOriginValidation);
-app.use((req, _res, next) => {
-    if (req.path === config.server.path) {
-        applyJsonAcceptCompatibility(req.headers, { sseEnabled: config.server.sseEnabled });
+function sendRuntimeError(res, error) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    const status = error instanceof Error && error.status ? error.status : 500;
+    if (!res.headersSent) {
+        res.status(status).json(createErrorResponse(message));
     }
-    next();
-});
-app.options(config.server.path, (_req, res) => sendCorsPreflight(res));
+}
 
-app.get("/health", (_req, res) => {
-    res.json({
-        status: "ok",
-        server: "llm-bitbucket-mcp",
-        endpoint: config.server.path,
-        workspace: config.bitbucket.workspace,
-        repoSlug: config.bitbucket.repoSlug,
-        defaultDestinationBranch: config.bitbucket.defaultDestinationBranch || null,
-        cloneRoot: config.cloneRoot,
-        pid: process.pid,
-        uptimeSec: Math.floor(process.uptime()),
-        activeSessions: sessions.size(),
+function createApp(config, sessions, client) {
+    const app = createMcpExpressApp({
+        host: config.server.host,
+        allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
     });
-});
 
-app.post(config.server.path, async (req, res) => {
-    const rawSessionId = req.headers["mcp-session-id"];
-    const sessionId = normalizeHeaderValue(rawSessionId);
-    const hasSessionHeader = rawSessionId !== undefined;
-    let transport;
+    app.use((req, res, next) => withOriginValidation(req, res, next, config));
+    app.use((req, _res, next) => {
+        if (req.path === config.server.path) {
+            applyJsonAcceptCompatibility(req.headers, { sseEnabled: config.server.sseEnabled });
+        }
+        next();
+    });
+    app.options(config.server.path, (_req, res) => sendCorsPreflight(res));
 
-    try {
-        if (sessionId) transport = sessions.get(sessionId);
+    app.get("/health", (_req, res) => {
+        res.json(
+            buildHealthPayload({
+                endpoint: config.server.path,
+                sessions,
+                uptimeSec: Math.floor(process.uptime()),
+            }),
+        );
+    });
 
-        if (sessionId && transport) {
-            await transport.handleRequest(req, res, req.body);
+    app.post(config.server.path, async (req, res) => {
+        const rawSessionId = req.headers["mcp-session-id"];
+        const sessionId = normalizeHeaderValue(rawSessionId);
+        const hasSessionHeader = rawSessionId !== undefined;
+        let transport;
+
+        try {
+            if (sessionId) transport = sessions.get(sessionId);
+
+            if (sessionId && transport) {
+                await transport.handleRequest(req, res, req.body);
+                return;
+            }
+            if (sessionId && !transport) {
+                sendUnknownSession(res);
+                return;
+            }
+            if (hasSessionHeader && !sessionId) {
+                sendUnknownSession(res);
+                return;
+            }
+
+            if (!sessionId && isInitializeRequest(req.body)) {
+                const server = createMcpServer(client);
+                transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => randomUUID(),
+                    enableJsonResponse: !config.server.sseEnabled,
+                    onsessioninitialized: (sid) => sessions.set(sid, transport),
+                });
+                transport.onclose = () => {
+                    const sid = transport.sessionId;
+                    if (sid) sessions.delete(sid);
+                };
+                await server.connect(transport);
+                await transport.handleRequest(req, res, req.body);
+                return;
+            }
+
+            sendMissingSession(res);
+        } catch (error) {
+            sendRuntimeError(res, error);
+        }
+    });
+
+    app.get(config.server.path, async (req, res) => {
+        if (!config.server.sseEnabled) {
+            res.status(405).set("Allow", "POST, DELETE").send("Method Not Allowed");
             return;
         }
-        if (sessionId && !transport) {
+        const rawSessionId = req.headers["mcp-session-id"];
+        if (rawSessionId === undefined) {
+            sendMissingSession(res);
+            return;
+        }
+        const sessionId = normalizeHeaderValue(rawSessionId);
+        const transport = sessionId ? sessions.get(sessionId) : null;
+        if (!sessionId || !transport) {
             sendUnknownSession(res);
             return;
         }
-        if (hasSessionHeader && !sessionId) {
+        try {
+            await transport.handleRequest(req, res);
+        } catch (error) {
+            sendRuntimeError(res, error);
+        }
+    });
+
+    app.delete(config.server.path, async (req, res) => {
+        const rawSessionId = req.headers["mcp-session-id"];
+        if (rawSessionId === undefined) {
+            sendMissingSession(res);
+            return;
+        }
+        const sessionId = normalizeHeaderValue(rawSessionId);
+        const transport = sessionId ? sessions.get(sessionId) : null;
+        if (!sessionId || !transport) {
             sendUnknownSession(res);
             return;
         }
-
-        if (!sessionId && isInitializeRequest(req.body)) {
-            const server = createMcpServer();
-            transport = new StreamableHTTPServerTransport({
-                sessionIdGenerator: () => randomUUID(),
-                enableJsonResponse: !config.server.sseEnabled,
-                onsessioninitialized: (sid) => sessions.set(sid, transport),
-            });
-            transport.onclose = () => {
-                const sid = transport.sessionId;
-                if (sid) sessions.delete(sid);
-            };
-            await server.connect(transport);
-            await transport.handleRequest(req, res, req.body);
-            return;
+        try {
+            await transport.handleRequest(req, res);
+        } catch (error) {
+            sendRuntimeError(res, error);
         }
+    });
 
-        sendMissingSession(res);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "Internal server error";
-        if (!res.headersSent) res.status(500).json(createErrorResponse(message));
-    }
-});
+    return app;
+}
 
-app.get(config.server.path, async (req, res) => {
-    if (!config.server.sseEnabled) {
-        res.status(405).set("Allow", "POST, DELETE").send("Method Not Allowed");
-        return;
-    }
-    const rawSessionId = req.headers["mcp-session-id"];
-    if (rawSessionId === undefined) {
-        sendMissingSession(res);
-        return;
-    }
-    const sessionId = normalizeHeaderValue(rawSessionId);
-    const transport = sessionId ? sessions.get(sessionId) : null;
-    if (!sessionId || !transport) {
-        sendUnknownSession(res);
-        return;
-    }
+function startServer() {
     try {
-        await transport.handleRequest(req, res);
-    } catch (error) {
-        if (!res.headersSent)
-            res.status(500).json(
-                createErrorResponse(
-                    error instanceof Error ? error.message : "Internal server error",
-                ),
-            );
-    }
-});
+        const config = getConfig();
+        const sessions = createSessionStore({
+            ttlMs: config.sessionTtlMs,
+            maxSessions: config.maxSessions,
+        });
+        const client = new BitbucketClient({
+            apiBase: config.bitbucket.apiBase,
+            workspace: config.bitbucket.workspace,
+            repoSlug: config.bitbucket.repoSlug,
+            userEmail: config.bitbucket.userEmail,
+            apiToken: config.bitbucket.apiToken,
+            defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
+            requestTimeoutMs: config.requestTimeoutMs,
+            maxResponseBytes: config.maxResponseBytes,
+            cloneRoot: config.cloneRoot,
+        });
+        const app = createApp(config, sessions, client);
 
-app.delete(config.server.path, async (req, res) => {
-    const rawSessionId = req.headers["mcp-session-id"];
-    if (rawSessionId === undefined) {
-        sendMissingSession(res);
-        return;
-    }
-    const sessionId = normalizeHeaderValue(rawSessionId);
-    const transport = sessionId ? sessions.get(sessionId) : null;
-    if (!sessionId || !transport) {
-        sendUnknownSession(res);
-        return;
-    }
-    try {
-        await transport.handleRequest(req, res);
-    } catch (error) {
-        if (!res.headersSent)
-            res.status(500).json(
-                createErrorResponse(
-                    error instanceof Error ? error.message : "Internal server error",
-                ),
+        app.listen(config.server.port, config.server.host, (error) => {
+            if (error) {
+                console.error("Failed to start llm-bitbucket-mcp:", error);
+                process.exit(1);
+            }
+            console.log(
+                `llm-bitbucket-mcp listening at http://${config.server.host}:${config.server.port}${config.server.path}`,
             );
-    }
-});
-
-app.listen(config.server.port, config.server.host, (error) => {
-    if (error) {
-        console.error("Failed to start llm-bitbucket-mcp:", error);
+            console.log(
+                `[CONFIG] host=${config.server.host} port=${config.server.port} path=${config.server.path}`,
+            );
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "Errore di startup sconosciuto.";
+        logger.logError("startup_error", error);
+        console.error(`Failed to start llm-bitbucket-mcp: ${message}`);
         process.exit(1);
     }
-    console.log(
-        `llm-bitbucket-mcp listening at http://${config.server.host}:${config.server.port}${config.server.path}`,
-    );
-    console.log(
-        `[CONFIG] workspace=${config.bitbucket.workspace} repo=${config.bitbucket.repoSlug}`,
-    );
-});
+}
+
+startServer();
