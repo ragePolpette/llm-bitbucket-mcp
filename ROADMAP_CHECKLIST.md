@@ -106,11 +106,11 @@ Notes:
 
 ### P0.4 Test Expansion
 
-- [ ] Aggiungere test su startup/config invalid
-- [ ] Aggiungere test sul lifecycle delle sessioni
-- [ ] Aggiungere test su CORS/origin validation
-- [ ] Aggiungere test su limiti e restrizioni di `bb_api`
-- [ ] Aggiungere almeno un test HTTP end-to-end sul server
+- [x] Aggiungere test su startup/config invalid
+- [x] Aggiungere test sul lifecycle delle sessioni
+- [x] Aggiungere test su CORS/origin validation
+- [x] Aggiungere test su limiti e restrizioni di `bb_api`
+- [x] Aggiungere almeno un test HTTP end-to-end sul server
 
 Definition of done:
 
@@ -119,9 +119,9 @@ Definition of done:
 
 Notes:
 
-- branch:
-- PR:
-- merged on:
+- branch: `feature/test-expansion`
+- PR: `#8`
+- merged on: `2026-03-25`
 
 ### P0.5 README And Portfolio Polish
 
