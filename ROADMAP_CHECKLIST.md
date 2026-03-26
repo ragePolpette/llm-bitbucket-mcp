@@ -146,9 +146,15 @@ Notes:
 
 ### P1.1 Observability Lite
 
-- [ ] Introdurre correlation id per request/tool call
-- [ ] Rendere i log piu' uniformi e meno rumorosi nei test
-- [ ] Distinguere meglio eventi runtime, warning ed errori
+- [x] Introdurre correlation id per request/tool call
+- [x] Rendere i log piu' uniformi e meno rumorosi nei test
+- [x] Distinguere meglio eventi runtime, warning ed errori
+
+Notes:
+
+- branch: `feature/observability-lite`
+- PR: `#10`
+- merged on: `2026-03-26`
 
 ### P1.2 Safer Git And Clone Operations
 
