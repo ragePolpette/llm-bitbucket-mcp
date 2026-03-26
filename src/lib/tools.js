@@ -107,6 +107,45 @@ export const TOOLS = [
             required: ["pr_id"],
         },
     },
+    {
+        name: "get_pull_request_commits",
+        description:
+            "Lista i commit inclusi nella pull request, in ordine cronologico. Paginazione automatica, cap 500.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
+        name: "get_pull_request_statuses",
+        description:
+            "Restituisce gli status di build/check associati alla pull request. Paginazione automatica, cap 500.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
+        name: "get_pull_request_tasks",
+        description:
+            "Lista i task della pull request, inclusi stato e commento collegato. Paginazione automatica, cap 500.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+            },
+            required: ["pr_id"],
+        },
+    },
 
     // ── PR write tools ───────────────────────────────────────────
     {

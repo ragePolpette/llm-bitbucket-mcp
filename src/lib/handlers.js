@@ -18,6 +18,12 @@ export async function handleToolCall(name, args, client) {
             return handleGetPRDiff(args, client);
         case "get_pull_request_comments":
             return handleGetPRComments(args, client);
+        case "get_pull_request_commits":
+            return handleGetPRCommits(args, client);
+        case "get_pull_request_statuses":
+            return handleGetPRStatuses(args, client);
+        case "get_pull_request_tasks":
+            return handleGetPRTasks(args, client);
         case "add_pull_request_comment":
             return handleAddPRComment(args, client);
         case "create_pull_request":
@@ -43,6 +49,9 @@ function handleBitbucketInfo(client) {
                 "get_pull_request",
                 "get_pull_request_diff",
                 "get_pull_request_comments",
+                "get_pull_request_commits",
+                "get_pull_request_statuses",
+                "get_pull_request_tasks",
             ],
             pr_write: ["create_pull_request", "open_pull_request", "add_pull_request_comment"],
             utility: ["bb_api"],
@@ -53,6 +62,12 @@ function handleBitbucketInfo(client) {
             create_pull_request:
                 "Richiede title e source_branch. destination_branch puo' arrivare dal payload oppure da BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
             open_pull_request: "Alias ergonomico di create_pull_request con lo stesso contract.",
+            get_pull_request_commits:
+                "Espone solo i commit effettivamente inclusi nella PR, con un cap locale di 500 elementi.",
+            get_pull_request_statuses:
+                "Restituisce gli status Bitbucket associati alla PR, utile per build e check summary.",
+            get_pull_request_tasks:
+                "Restituisce i task della PR con stato e contenuto raw, utile per follow-up review.",
             bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
         },
         runtime_options: {
@@ -176,59 +191,55 @@ async function handleGetPRDiff(args, client) {
 async function handleGetPRComments(args, client) {
     requirePositiveIntegerParam(args, "pr_id");
 
-    logger.logApiCall(
-        "GET",
-        `pullrequests/${args.pr_id}/comments`,
-        "get_pull_request_comments",
-        "in",
-        {},
-    );
-
-    const allComments = [];
-    let nextPath = client.repoPath(`pullrequests/${args.pr_id}/comments`);
-    const maxComments = 500;
-    let isFirstPage = true;
-
-    while (nextPath && allComments.length < maxComments) {
-        const qp = isFirstPage ? { pagelen: "100" } : {};
-        const result = await client.request("GET", nextPath, { queryParams: qp });
-        for (const c of result.values || []) {
-            allComments.push({
-                id: c.id,
-                author: c.user?.display_name,
-                content: c.content?.raw,
-                created_on: c.created_on,
-                updated_on: c.updated_on,
-                inline: c.inline || null,
-                parent_id: c.parent?.id || null,
-            });
-        }
-        if (result.next) {
-            const nextUrl = new URL(result.next);
-            nextPath = nextUrl.pathname + nextUrl.search;
-        } else {
-            nextPath = null;
-        }
-        isFirstPage = false;
-    }
-
-    logger.logApiCall(
-        "GET",
-        `pullrequests/${args.pr_id}/comments`,
-        "get_pull_request_comments",
-        "out",
+    const { items, truncated } = await collectPullRequestCollection(
+        args.pr_id,
+        "comments",
+        client,
         {
-            success: true,
-            result_count: allComments.length,
-            has_results: allComments.length > 0,
+            tool: "get_pull_request_comments",
+            mapValue: mapPrComment,
         },
     );
 
-    return {
-        count: allComments.length,
-        truncated: allComments.length >= maxComments,
-        comments: allComments,
-    };
+    return { count: items.length, truncated, comments: items };
+}
+
+async function handleGetPRCommits(args, client) {
+    requirePositiveIntegerParam(args, "pr_id");
+
+    const { items, truncated } = await collectPullRequestCollection(args.pr_id, "commits", client, {
+        tool: "get_pull_request_commits",
+        mapValue: mapPrCommit,
+    });
+
+    return { count: items.length, truncated, commits: items };
+}
+
+async function handleGetPRStatuses(args, client) {
+    requirePositiveIntegerParam(args, "pr_id");
+
+    const { items, truncated } = await collectPullRequestCollection(
+        args.pr_id,
+        "statuses",
+        client,
+        {
+            tool: "get_pull_request_statuses",
+            mapValue: mapPrStatus,
+        },
+    );
+
+    return { count: items.length, truncated, statuses: items };
+}
+
+async function handleGetPRTasks(args, client) {
+    requirePositiveIntegerParam(args, "pr_id");
+
+    const { items, truncated } = await collectPullRequestCollection(args.pr_id, "tasks", client, {
+        tool: "get_pull_request_tasks",
+        mapValue: mapPrTask,
+    });
+
+    return { count: items.length, truncated, tasks: items };
 }
 
 // ── PR write handlers ────────────────────────────────────────────
@@ -422,6 +433,54 @@ async function listPullRequests(args, client) {
     return result;
 }
 
+async function collectPullRequestCollection(prId, suffix, client, { tool, mapValue }) {
+    const path = client.repoPath(`pullrequests/${prId}/${suffix}`);
+    logger.logApiCall("GET", `pullrequests/${prId}/${suffix}`, tool, "in", {});
+
+    const { items, truncated } = await collectPaginatedValues(client, path, mapValue);
+
+    logger.logApiCall("GET", `pullrequests/${prId}/${suffix}`, tool, "out", {
+        success: true,
+        result_count: items.length,
+        has_results: items.length > 0,
+        truncated,
+    });
+
+    return { items, truncated };
+}
+
+async function collectPaginatedValues(client, initialPath, mapValue) {
+    const items = [];
+    let nextPath = initialPath;
+    let isFirstPage = true;
+
+    while (nextPath && items.length < TOOL_LIMITS.paginatedCollectionCap) {
+        const result = await client.request("GET", nextPath, {
+            queryParams: isFirstPage ? { pagelen: String(TOOL_LIMITS.bitbucketPageLength) } : {},
+        });
+
+        for (const value of result.values || []) {
+            items.push(mapValue(value));
+            if (items.length >= TOOL_LIMITS.paginatedCollectionCap) {
+                break;
+            }
+        }
+
+        if (result.next && items.length < TOOL_LIMITS.paginatedCollectionCap) {
+            const nextUrl = new URL(result.next);
+            nextPath = nextUrl.pathname + nextUrl.search;
+        } else {
+            nextPath = null;
+        }
+        isFirstPage = false;
+    }
+
+    return {
+        items,
+        truncated: nextPath !== null,
+    };
+}
+
 function buildPullRequestQuery(sourceBranch, destinationBranch) {
     const clauses = [];
     if (sourceBranch) clauses.push('source.branch.name="' + escapeQueryValue(sourceBranch) + '"');
@@ -579,5 +638,54 @@ function mapPrSummary(pr) {
         updated_on: pr.updated_on,
         comment_count: pr.comment_count,
         link: pr.links?.html?.href,
+    };
+}
+
+function mapPrComment(comment) {
+    return {
+        id: comment.id,
+        author: comment.user?.display_name,
+        content: comment.content?.raw,
+        created_on: comment.created_on,
+        updated_on: comment.updated_on,
+        inline: comment.inline || null,
+        parent_id: comment.parent?.id || null,
+    };
+}
+
+function mapPrCommit(commit) {
+    return {
+        hash: commit.hash,
+        message: commit.message || "",
+        summary: commit.summary?.raw || "",
+        author: commit.author?.user?.display_name || commit.author?.raw || null,
+        date: commit.date || null,
+        parents: (commit.parents || []).map((parent) => parent.hash),
+        link: commit.links?.html?.href || null,
+    };
+}
+
+function mapPrStatus(status) {
+    return {
+        key: status.key || null,
+        name: status.name || null,
+        state: status.state || null,
+        description: status.description || "",
+        refname: status.refname || null,
+        url: status.url || null,
+        created_on: status.created_on || null,
+        updated_on: status.updated_on || null,
+    };
+}
+
+function mapPrTask(task) {
+    return {
+        id: task.id || null,
+        state: task.state || null,
+        content: task.content?.raw || "",
+        creator: task.creator?.display_name || task.creator?.nickname || null,
+        created_on: task.created_on || null,
+        updated_on: task.updated_on || null,
+        comment_id: task.comment?.id || null,
     };
 }
