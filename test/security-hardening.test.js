@@ -26,6 +26,9 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
 
     assert.equal(result.server, "llm-bitbucket-mcp");
     assert.ok(result.tool_map.discovery.includes("find_open_pull_request"));
+    assert.ok(result.tool_map.discovery.includes("get_pull_request_commits"));
+    assert.ok(result.tool_map.discovery.includes("get_pull_request_statuses"));
+    assert.ok(result.tool_map.discovery.includes("get_pull_request_tasks"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
     assert.deepEqual(result.tool_map.utility, ["bb_api"]);
     assert.equal(result.runtime_options.default_destination_branch, "develop");
@@ -303,6 +306,136 @@ test("bb_api allows repo-scoped paths", async () => {
         method: "GET",
         path: "/repositories/ws/repo/pipelines",
         queryParams: { state: "SUCCESSFUL" },
+    });
+});
+
+test("get_pull_request_commits returns commit summaries", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { queryParams } = {}) {
+            calls.push({ method, path, queryParams });
+            return {
+                values: [
+                    {
+                        hash: "abc123",
+                        message: "Add feature",
+                        summary: { raw: "Add feature summary" },
+                        author: { raw: "Alice <alice@example.com>" },
+                        date: "2026-03-26T12:00:00Z",
+                        parents: [{ hash: "parent1" }],
+                        links: { html: { href: "https://bitbucket/commit/abc123" } },
+                    },
+                ],
+            };
+        },
+    };
+
+    const result = await handleToolCall("get_pull_request_commits", { pr_id: 42 }, client);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].path, "/repositories/ws/repo/pullrequests/42/commits");
+    assert.deepEqual(calls[0].queryParams, { pagelen: "100" });
+    assert.deepEqual(result, {
+        count: 1,
+        truncated: false,
+        commits: [
+            {
+                hash: "abc123",
+                message: "Add feature",
+                summary: "Add feature summary",
+                author: "Alice <alice@example.com>",
+                date: "2026-03-26T12:00:00Z",
+                parents: ["parent1"],
+                link: "https://bitbucket/commit/abc123",
+            },
+        ],
+    });
+});
+
+test("get_pull_request_statuses returns build status summaries", async () => {
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            return {
+                values: [
+                    {
+                        key: "CI",
+                        name: "CI pipeline",
+                        state: "SUCCESSFUL",
+                        description: "42 tests passed",
+                        refname: "feature/test",
+                        url: "https://ci.example.com/build/42",
+                        created_on: "2026-03-26T11:00:00Z",
+                        updated_on: "2026-03-26T11:05:00Z",
+                    },
+                ],
+            };
+        },
+    };
+
+    const result = await handleToolCall("get_pull_request_statuses", { pr_id: 42 }, client);
+
+    assert.deepEqual(result, {
+        count: 1,
+        truncated: false,
+        statuses: [
+            {
+                key: "CI",
+                name: "CI pipeline",
+                state: "SUCCESSFUL",
+                description: "42 tests passed",
+                refname: "feature/test",
+                url: "https://ci.example.com/build/42",
+                created_on: "2026-03-26T11:00:00Z",
+                updated_on: "2026-03-26T11:05:00Z",
+            },
+        ],
+    });
+});
+
+test("get_pull_request_tasks returns task summaries", async () => {
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            return {
+                values: [
+                    {
+                        id: 7,
+                        state: "OPEN",
+                        content: { raw: "Follow up on naming" },
+                        creator: { display_name: "Alice" },
+                        created_on: "2026-03-26T10:00:00Z",
+                        updated_on: "2026-03-26T10:05:00Z",
+                        comment: { id: 99 },
+                    },
+                ],
+            };
+        },
+    };
+
+    const result = await handleToolCall("get_pull_request_tasks", { pr_id: 42 }, client);
+
+    assert.deepEqual(result, {
+        count: 1,
+        truncated: false,
+        tasks: [
+            {
+                id: 7,
+                state: "OPEN",
+                content: "Follow up on naming",
+                creator: "Alice",
+                created_on: "2026-03-26T10:00:00Z",
+                updated_on: "2026-03-26T10:05:00Z",
+                comment_id: 99,
+            },
+        ],
     });
 });
 
