@@ -170,9 +170,15 @@ Notes:
 
 ### P1.3 Better Product Structure
 
-- [ ] Separare bootstrap server e app factory per testabilita'
-- [ ] Centralizzare costanti e policy di sicurezza
-- [ ] Ridurre logica sparsa tra config, handler e server
+- [x] Separare bootstrap server e app factory per testabilita'
+- [x] Centralizzare costanti e policy di sicurezza
+- [x] Ridurre logica sparsa tra config, handler e server
+
+Notes:
+
+- branch: `feature/product-structure`
+- PR: `#12`
+- merged on: `2026-03-26`
 
 ### P1.4 More Complete Tool Surface
 
