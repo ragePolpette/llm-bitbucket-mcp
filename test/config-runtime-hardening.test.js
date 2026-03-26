@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { getConfigFromEnv } from "../src/lib/config.js";
 import { buildHealthPayload } from "../src/lib/health.js";
+import { DEFAULT_SERVER_PATH, SERVER_NAME } from "../src/lib/runtime-policy.js";
 import { createSessionStore, SessionStoreCapacityError } from "../src/lib/session-store.js";
 
 function createValidEnv(overrides = {}) {
@@ -19,7 +20,7 @@ test("getConfigFromEnv applies safe runtime defaults", () => {
     assert.equal(config.sessionTtlMs, 30 * 60 * 1000);
     assert.equal(config.maxSessions, 100);
     assert.equal(config.requestTimeoutMs, 30000);
-    assert.equal(config.server.path, "/mcp");
+    assert.equal(config.server.path, DEFAULT_SERVER_PATH);
 });
 
 test("getConfigFromEnv reports aggregated validation errors", () => {
@@ -77,7 +78,7 @@ test("health payload is minimal and runtime-oriented", () => {
 
     assert.deepEqual(payload, {
         status: "ok",
-        server: "llm-bitbucket-mcp",
+        server: SERVER_NAME,
         endpoint: "/mcp",
         uptimeSec: 42,
         activeSessions: 3,
