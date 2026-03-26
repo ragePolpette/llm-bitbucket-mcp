@@ -15,6 +15,7 @@ It is not designed as a public multi-tenant SaaS service.
 The server exposes a focused Bitbucket MCP surface for:
 
 - pull request discovery and inspection
+- pull request commits, statuses and tasks
 - pull request comments
 - pull request creation
 - a constrained read-only Bitbucket API escape hatch
@@ -27,6 +28,9 @@ Current exposed tools:
 - `get_pull_request`
 - `get_pull_request_diff`
 - `get_pull_request_comments`
+- `get_pull_request_commits`
+- `get_pull_request_statuses`
+- `get_pull_request_tasks`
 - `add_pull_request_comment`
 - `create_pull_request`
 - `open_pull_request`
@@ -173,6 +177,17 @@ CI runs lint, formatting checks and tests on push and pull request.
 }
 ```
 
+### Inspect PR build statuses
+
+```json
+{
+    "tool": "get_pull_request_statuses",
+    "arguments": {
+        "pr_id": 42
+    }
+}
+```
+
 ### Query a repo-scoped Bitbucket endpoint
 
 ```json
@@ -209,7 +224,8 @@ Completed so far:
 - `P1.1 Observability Lite`
 - `P1.2 Tool Surface Simplification`
 - `P1.3 Better Product Structure`
+- `P1.4 More Complete Tool Surface`
 
 Current next step:
 
-- `P1.4 More Complete Tool Surface`
+- `P2.1 Security And Governance`
