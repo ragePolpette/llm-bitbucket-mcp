@@ -29,11 +29,15 @@ function startServer() {
                 console.error("Failed to start llm-bitbucket-mcp:", error);
                 process.exit(1);
             }
+            logger.logInfo("server_started", {
+                host: config.server.host,
+                port: config.server.port,
+                path: config.server.path,
+                max_sessions: config.maxSessions,
+                session_ttl_ms: config.sessionTtlMs,
+            });
             console.log(
                 `llm-bitbucket-mcp listening at http://${config.server.host}:${config.server.port}${config.server.path}`,
-            );
-            console.log(
-                `[CONFIG] host=${config.server.host} port=${config.server.port} path=${config.server.path}`,
             );
         });
     } catch (error) {

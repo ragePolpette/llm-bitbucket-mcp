@@ -10,7 +10,7 @@
         "format:check": "prettier --check .",
         "lint": "eslint .",
         "start": "node src/server.js",
-        "test": "node --test"
+        "test": "node --import ./scripts/test-env.js --test"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.0"
