@@ -208,7 +208,8 @@ Completed so far:
 - `P0.5 README And Portfolio Polish`
 - `P1.1 Observability Lite`
 - `P1.2 Tool Surface Simplification`
+- `P1.3 Better Product Structure`
 
 Current next step:
 
-- `P1.3 Better Product Structure`
+- `P1.4 More Complete Tool Surface`
