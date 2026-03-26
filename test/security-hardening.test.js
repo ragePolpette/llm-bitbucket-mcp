@@ -5,6 +5,7 @@ import {
     isRepoScopedBitbucketApiPath,
     normalizeBitbucketApiPath,
 } from "../src/lib/bitbucket-client.js";
+import { getEnabledToolNames } from "../src/lib/tools.js";
 
 test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
@@ -15,6 +16,15 @@ test("still-hidden pull request mutation handlers are rejected by dispatcher", a
         () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}),
         /Tool non supportato/,
     );
+});
+
+test("write tool allowlist can remove selected write tools from the exposed surface", () => {
+    const enabledToolNames = getEnabledToolNames(["add_pull_request_comment"]);
+
+    assert.equal(enabledToolNames.has("add_pull_request_comment"), true);
+    assert.equal(enabledToolNames.has("create_pull_request"), false);
+    assert.equal(enabledToolNames.has("open_pull_request"), false);
+    assert.equal(enabledToolNames.has("get_pull_request"), true);
 });
 
 test("bitbucket_info exposes tool map and runtime branch semantics", async () => {
@@ -31,7 +41,9 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
     assert.ok(result.tool_map.discovery.includes("get_pull_request_tasks"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
     assert.deepEqual(result.tool_map.utility, ["bb_api"]);
+    assert.equal(result.runtime_options.auth_enabled, false);
     assert.equal(result.runtime_options.default_destination_branch, "develop");
+    assert.deepEqual(result.runtime_options.enabled_write_tools, []);
 });
 
 test("create_pull_request is dispatched when explicitly exposed", async () => {

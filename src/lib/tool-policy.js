@@ -1,3 +1,11 @@
+export const WRITE_TOOL_NAMES = new Set([
+    "add_pull_request_comment",
+    "create_pull_request",
+    "open_pull_request",
+]);
+
+export const DEFAULT_ENABLED_WRITE_TOOLS = [...WRITE_TOOL_NAMES];
+
 export const TOOL_LIMITS = {
     branchNameLength: 255,
     titleLength: 200,

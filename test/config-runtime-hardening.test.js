@@ -21,6 +21,12 @@ test("getConfigFromEnv applies safe runtime defaults", () => {
     assert.equal(config.maxSessions, 100);
     assert.equal(config.requestTimeoutMs, 30000);
     assert.equal(config.server.path, DEFAULT_SERVER_PATH);
+    assert.equal(config.security.authEnabled, false);
+    assert.deepEqual(config.security.enabledWriteTools, [
+        "add_pull_request_comment",
+        "create_pull_request",
+        "open_pull_request",
+    ]);
 });
 
 test("getConfigFromEnv reports aggregated validation errors", () => {
@@ -34,6 +40,8 @@ test("getConfigFromEnv reports aggregated validation errors", () => {
                 MCP_BB_MAX_SESSIONS: "0",
                 MCP_BB_ALLOWED_HOSTS: "",
                 MCP_BB_ALLOWED_ORIGINS: "",
+                MCP_BB_INTERNAL_API_KEY: "short",
+                MCP_BB_ENABLED_WRITE_TOOLS: "merge_pull_request",
             }),
         /Configurazione non valida:/,
     );

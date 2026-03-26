@@ -4,10 +4,10 @@ import { ALLOWED_PR_STATES, TOOL_LIMITS } from "./tool-policy.js";
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
-export async function handleToolCall(name, args, client) {
+export async function handleToolCall(name, args, client, policy = {}) {
     switch (name) {
         case "bitbucket_info":
-            return handleBitbucketInfo(client);
+            return handleBitbucketInfo(client, policy);
         case "list_pull_requests":
             return handleListPRs(args, client);
         case "find_open_pull_request":
@@ -37,7 +37,7 @@ export async function handleToolCall(name, args, client) {
     }
 }
 
-function handleBitbucketInfo(client) {
+function handleBitbucketInfo(client, policy) {
     return {
         server: "llm-bitbucket-mcp",
         purpose: "Bitbucket Cloud MCP focalizzato su PR e read API repository-scoped.",
@@ -71,12 +71,15 @@ function handleBitbucketInfo(client) {
             bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
         },
         runtime_options: {
+            auth_enabled: Boolean(policy.authEnabled),
             default_destination_branch_configured: Boolean(client.defaultDestinationBranch),
             default_destination_branch: client.defaultDestinationBranch || null,
+            enabled_write_tools: policy.enabledWriteTools || [],
         },
         boundaries: [
             "Gestisce solo operazioni Bitbucket remote sul repository configurato.",
             "Non espone clone, checkout_branch o create_commit del workspace locale.",
+            "I tool write esposti possono essere limitati via configurazione runtime.",
             "Per git locale usare l'harness o un MCP git dedicato.",
         ],
     };
