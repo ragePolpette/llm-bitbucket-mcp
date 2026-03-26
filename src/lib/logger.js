@@ -87,6 +87,10 @@ export function logApiCall(method, path, tool, phase, payload = {}) {
     logEvent(event, fields, { level: "info" });
 }
 
+export function logAudit(event, payload = {}) {
+    logEvent(event, { audit: true, ...payload }, { level: "info" });
+}
+
 export function logWarn(event, payload = {}) {
     logEvent(event, payload, { level: "warn" });
 }

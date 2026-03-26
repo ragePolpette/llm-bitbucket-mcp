@@ -1,12 +1,18 @@
+import { timingSafeEqual } from "node:crypto";
+
 export const SERVER_NAME = "llm-bitbucket-mcp";
 export const SERVER_VERSION = "1.0.0";
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PATH = "/mcp";
 export const HEALTH_ENDPOINT = "/health";
 export const MCP_SESSION_HEADER = "mcp-session-id";
+export const MCP_API_KEY_HEADER = "x-mcp-api-key";
+export const AUTHORIZATION_HEADER = "authorization";
 export const JSON_RPC_ERROR_CODE = -32000;
 export const CORS_ALLOWED_METHODS = "POST, GET, DELETE, OPTIONS";
-export const CORS_ALLOWED_HEADERS = `Content-Type, Accept, ${MCP_SESSION_HEADER}`;
+export const CORS_ALLOWED_HEADERS =
+    `Content-Type, Accept, ${MCP_SESSION_HEADER}, ` +
+    `${MCP_API_KEY_HEADER}, ${AUTHORIZATION_HEADER}`;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 export const MIN_REQUEST_TIMEOUT_MS = 5000;
 export const MAX_REQUEST_TIMEOUT_MS = 120000;
@@ -70,4 +76,30 @@ export function createJsonRpcErrorResponse(message) {
         },
         id: null,
     };
+}
+
+export function extractApiKey(headers) {
+    const directValue = normalizeHeaderValue(headers[MCP_API_KEY_HEADER]);
+    if (directValue) {
+        return directValue;
+    }
+
+    const authorization = normalizeHeaderValue(headers[AUTHORIZATION_HEADER]);
+    if (/^bearer\s+/i.test(authorization)) {
+        return authorization.replace(/^bearer\s+/i, "").trim();
+    }
+
+    return "";
+}
+
+export function safeEqualSecret(expected, received) {
+    if (!expected || !received) {
+        return false;
+    }
+    const expectedBuffer = Buffer.from(expected);
+    const receivedBuffer = Buffer.from(received);
+    if (expectedBuffer.length !== receivedBuffer.length) {
+        return false;
+    }
+    return timingSafeEqual(expectedBuffer, receivedBuffer);
 }
