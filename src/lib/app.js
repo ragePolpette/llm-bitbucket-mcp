@@ -99,6 +99,7 @@ function withOriginValidation(req, res, next, config) {
         return;
     }
     if (!isOriginAllowed(origin, config.server.allowedOrigins)) {
+        logger.logWarn("origin_blocked", { origin });
         res.status(403).json(createErrorResponse("Forbidden: Origin not allowed"));
         return;
     }
@@ -119,10 +120,12 @@ function sendCorsPreflight(res) {
 }
 
 function sendMissingSession(res) {
+    logger.logWarn("missing_session");
     res.status(400).json(createErrorResponse("Bad Request: Missing session ID"));
 }
 
 function sendUnknownSession(res) {
+    logger.logWarn("unknown_session");
     res.status(404).json(createErrorResponse("Not Found: Invalid or expired session ID"));
 }
 
@@ -140,6 +143,17 @@ export function createApp(config, sessions, client) {
         allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
     });
 
+    app.use((req, _res, next) =>
+        logger.runWithLogContext(
+            {
+                requestId: randomUUID(),
+                sessionId: normalizeHeaderValue(req.headers["mcp-session-id"]) || null,
+                method: req.method,
+                path: req.path,
+            },
+            next,
+        ),
+    );
     app.use((req, res, next) => withOriginValidation(req, res, next, config));
     app.use((req, _res, next) => {
         if (req.path === config.server.path) {
@@ -150,6 +164,7 @@ export function createApp(config, sessions, client) {
     app.options(config.server.path, (_req, res) => sendCorsPreflight(res));
 
     app.get("/health", (_req, res) => {
+        logger.logInfo("health_check");
         res.json(
             buildHealthPayload({
                 endpoint: config.server.path,
@@ -182,6 +197,7 @@ export function createApp(config, sessions, client) {
             }
 
             if (!sessionId && isInitializeRequest(req.body)) {
+                logger.logInfo("session_initialize");
                 const server = createMcpServer(client);
                 transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
@@ -220,6 +236,7 @@ export function createApp(config, sessions, client) {
             return;
         }
         try {
+            logger.logInfo("session_stream_open");
             await transport.handleRequest(req, res);
         } catch (error) {
             sendRuntimeError(res, error);
@@ -239,6 +256,7 @@ export function createApp(config, sessions, client) {
             return;
         }
         try {
+            logger.logInfo("session_delete");
             await transport.handleRequest(req, res);
         } catch (error) {
             sendRuntimeError(res, error);
