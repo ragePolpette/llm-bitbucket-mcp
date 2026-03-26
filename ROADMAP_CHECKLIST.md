@@ -153,7 +153,7 @@ Notes:
 Notes:
 
 - branch: `feature/observability-lite`
-- PR:
+- PR: `#10`
 - merged on:
 
 ### P1.2 Safer Git And Clone Operations
