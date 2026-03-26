@@ -182,9 +182,15 @@ Notes:
 
 ### P1.4 More Complete Tool Surface
 
-- [ ] Valutare se aggiungere altri tool read-only utili
-- [ ] Lasciare i tool distruttivi fuori dal surface finche' non hanno policy e test adeguati
-- [ ] Rifinire naming e descrizioni dei tool per MCP discovery
+- [x] Valutare se aggiungere altri tool read-only utili
+- [x] Lasciare i tool distruttivi fuori dal surface finche' non hanno policy e test adeguati
+- [x] Rifinire naming e descrizioni dei tool per MCP discovery
+
+Notes:
+
+- branch: `feature/more-complete-tool-surface`
+- PR: `#13`
+- merged on: `2026-03-26`
 
 ## Phase P2: Enterprise-Oriented Future
 

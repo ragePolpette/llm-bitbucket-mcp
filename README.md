@@ -224,7 +224,8 @@ Completed so far:
 - `P1.1 Observability Lite`
 - `P1.2 Tool Surface Simplification`
 - `P1.3 Better Product Structure`
+- `P1.4 More Complete Tool Surface`
 
 Current next step:
 
-- `P1.4 More Complete Tool Surface`
+- `P2.1 Security And Governance`
