@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+test
+scripts
+.pytest_cache
+.env
+.env.*
+HARNESS_IMPLEMENTATION_PROMPT.md
+ROADMAP_CHECKLIST.md
