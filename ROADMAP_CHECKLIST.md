@@ -210,9 +210,15 @@ Notes:
 
 ### P2.2 Packaging And Distribution
 
-- [ ] Dockerfile minimale
-- [ ] release notes o changelog
-- [ ] versione semantica e processo di release piu' ordinato
+- [x] Dockerfile minimale
+- [x] release notes o changelog
+- [x] versione semantica e processo di release piu' ordinato
+
+Notes:
+
+- branch: `feature/packaging-distribution`
+- PR: `#16`
+- merged on: `2026-03-26`
 
 ### P2.3 Advanced Reliability
 
