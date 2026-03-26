@@ -162,6 +162,12 @@ Notes:
 - [x] Eliminare config e runtime path residue legate al clone locale
 - [x] Allineare README, test e boundary di prodotto al focus su PR/API repository-scoped
 
+Notes:
+
+- branch: `feature/safer-clone-operations`
+- PR: `#11`
+- merged on: `2026-03-26`
+
 ### P1.3 Better Product Structure
 
 - [ ] Separare bootstrap server e app factory per testabilita'
