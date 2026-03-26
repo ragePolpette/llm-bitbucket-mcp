@@ -33,8 +33,6 @@ export async function handleToolCall(name, args, client) {
             return handleCreatePR(args, client);
         case "open_pull_request":
             return handleCreatePR(args, client);
-        case "bb_clone":
-            return handleClone(args, client);
         case "bb_api":
             return handleGenericApi(args, client);
         default:
@@ -45,7 +43,7 @@ export async function handleToolCall(name, args, client) {
 function handleBitbucketInfo(client) {
     return {
         server: "llm-bitbucket-mcp",
-        purpose: "Bitbucket Cloud MCP focalizzato su PR, read API e clone workspace-aware.",
+        purpose: "Bitbucket Cloud MCP focalizzato su PR e read API repository-scoped.",
         tool_map: {
             discovery: [
                 "bitbucket_info",
@@ -56,7 +54,7 @@ function handleBitbucketInfo(client) {
                 "get_pull_request_comments",
             ],
             pr_write: ["create_pull_request", "open_pull_request", "add_pull_request_comment"],
-            utility: ["bb_clone", "bb_api"],
+            utility: ["bb_api"],
         },
         usage_notes: {
             find_open_pull_request:
@@ -65,17 +63,15 @@ function handleBitbucketInfo(client) {
                 "Richiede title e source_branch. destination_branch puo' arrivare dal payload oppure da BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
             open_pull_request: "Alias ergonomico di create_pull_request con lo stesso contract.",
             bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
-            bb_clone:
-                "Clona dentro la clone root configurata; targetPath deve restare sotto quella root e deve essere nuovo.",
         },
         runtime_options: {
             default_destination_branch_configured: Boolean(client.defaultDestinationBranch),
             default_destination_branch: client.defaultDestinationBranch || null,
         },
         boundaries: [
-            "Gestisce operazioni Bitbucket remote e clone locale controllato.",
-            "Non espone checkout_branch o create_commit del workspace locale.",
-            "Per git locale usare l'harness o un eventuale MCP git dedicato.",
+            "Gestisce solo operazioni Bitbucket remote sul repository configurato.",
+            "Non espone clone, checkout_branch o create_commit del workspace locale.",
+            "Per git locale usare l'harness o un MCP git dedicato.",
         ],
     };
 }
@@ -382,21 +378,6 @@ async function handleMergePR(args, client) {
 }
 
 // ── Utility handlers ─────────────────────────────────────────────
-
-async function handleClone(args, client) {
-    requireStringParam(args, "repoSlug", { maxLength: 100 });
-    requireStringParam(args, "targetPath", { maxLength: 500 });
-    validateOptionalString(args.workspaceSlug, "workspaceSlug", { maxLength: 100 });
-
-    logger.logApiCall("POST", `clone/${args.repoSlug}`, "bb_clone", "in", {
-        workspace_slug: args.workspaceSlug || "default",
-        repo_slug: args.repoSlug,
-    });
-    const result = await client.clone(args.workspaceSlug, args.repoSlug, args.targetPath);
-    logger.logApiCall("POST", `clone/${args.repoSlug}`, "bb_clone", "out", { success: true });
-
-    return result;
-}
 
 async function handleGenericApi(args, client) {
     requireStringParam(args, "method", { maxLength: 10 });
