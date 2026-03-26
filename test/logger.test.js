@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { logEvent, logWarn, runWithLogContext } from "../src/lib/logger.js";
+import { logAudit, logEvent, logWarn, runWithLogContext } from "../src/lib/logger.js";
 
 test("logger attaches correlation context to emitted events", () => {
     const writes = [];
@@ -86,4 +86,30 @@ test("logger emits warnings when warn level is enabled", () => {
     assert.equal(writes.length, 1);
     assert.match(writes[0], /"level":"WARN"/);
     assert.match(writes[0], /runtime_warning/);
+});
+
+test("logger emits audit events with the audit marker", () => {
+    const writes = [];
+    const originalLevel = process.env.LLM_BB_MCP_LOG_LEVEL;
+    const originalWrite = process.stdout.write;
+    process.env.LLM_BB_MCP_LOG_LEVEL = "info";
+    process.stdout.write = (chunk) => {
+        writes.push(String(chunk));
+        return true;
+    };
+
+    try {
+        logAudit("write_tool_success", { tool: "create_pull_request" });
+    } finally {
+        process.stdout.write = originalWrite;
+        if (originalLevel === undefined) {
+            delete process.env.LLM_BB_MCP_LOG_LEVEL;
+        } else {
+            process.env.LLM_BB_MCP_LOG_LEVEL = originalLevel;
+        }
+    }
+
+    assert.equal(writes.length, 1);
+    assert.match(writes[0], /write_tool_success/);
+    assert.match(writes[0], /"audit":true/);
 });

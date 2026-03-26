@@ -7,7 +7,7 @@ import {
     isInitializeRequest,
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { EXPOSED_TOOL_NAMES, TOOLS } from "./tools.js";
+import { EXPOSED_TOOL_NAMES } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
 import * as logger from "./logger.js";
 import { applyJsonAcceptCompatibility } from "./accept-compat.js";
@@ -16,13 +16,18 @@ import {
     CORS_ALLOWED_HEADERS,
     CORS_ALLOWED_METHODS,
     HEALTH_ENDPOINT,
+    MCP_API_KEY_HEADER,
     MCP_SESSION_HEADER,
     SERVER_NAME,
     SERVER_VERSION,
     createJsonRpcErrorResponse,
+    extractApiKey,
     isOriginAllowed,
     normalizeHeaderValue,
+    safeEqualSecret,
 } from "./runtime-policy.js";
+import { WRITE_TOOL_NAMES } from "./tool-policy.js";
+import { getEnabledToolNames, getEnabledTools } from "./tools.js";
 
 function asTextResult(payload) {
     return {
@@ -30,23 +35,39 @@ function asTextResult(payload) {
     };
 }
 
-function createMcpServer(client) {
+function createMcpServer(client, config) {
+    const enabledTools = getEnabledTools(config.security.enabledWriteTools);
+    const enabledToolNames = getEnabledToolNames(config.security.enabledWriteTools);
     const server = new Server(
         { name: SERVER_NAME, version: SERVER_VERSION },
         { capabilities: { tools: {} } },
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: enabledTools }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
+        const isWriteTool = WRITE_TOOL_NAMES.has(name);
         try {
-            if (!EXPOSED_TOOL_NAMES.has(name)) {
+            if (!EXPOSED_TOOL_NAMES.has(name) || !enabledToolNames.has(name)) {
+                if (isWriteTool) {
+                    logger.logWarn("write_tool_blocked", { tool: name });
+                }
                 throw new Error(`Tool non esposto dal surface MCP corrente: ${name}`);
             }
-            const result = await handleToolCall(name, args, client);
+            const result = await handleToolCall(name, args, client, config.security);
+            if (isWriteTool) {
+                logger.logAudit("write_tool_success", { tool: name });
+            }
             return asTextResult(result);
         } catch (error) {
+            if (isWriteTool) {
+                logger.logAudit("write_tool_failure", {
+                    tool: name,
+                    status: error.status || null,
+                    message: error.message,
+                });
+            }
             logger.logError("tool_error", error);
             return {
                 content: [
@@ -85,6 +106,28 @@ function withOriginValidation(req, res, next, config) {
     res.set("Vary", "Origin");
     res.set("Access-Control-Allow-Origin", origin);
     next();
+}
+
+function withApiKeyAuth(req, res, next, config) {
+    if (!config.security.authEnabled || req.method === "OPTIONS") {
+        next();
+        return;
+    }
+
+    const providedApiKey = extractApiKey(req.headers);
+    if (safeEqualSecret(config.security.internalApiKey, providedApiKey)) {
+        next();
+        return;
+    }
+
+    logger.logWarn("auth_blocked", {
+        header: MCP_API_KEY_HEADER,
+        has_api_key: Boolean(providedApiKey),
+        path: req.path,
+    });
+    res.status(401)
+        .set("WWW-Authenticate", `Bearer realm="${SERVER_NAME}"`)
+        .json(createErrorResponse("Unauthorized: Missing or invalid API key"));
 }
 
 function createErrorResponse(message) {
@@ -133,6 +176,7 @@ export function createApp(config, sessions, client) {
             next,
         ),
     );
+    app.use((req, res, next) => withApiKeyAuth(req, res, next, config));
     app.use((req, res, next) => withOriginValidation(req, res, next, config));
     app.use((req, _res, next) => {
         if (req.path === config.server.path) {
@@ -177,7 +221,7 @@ export function createApp(config, sessions, client) {
 
             if (!sessionId && isInitializeRequest(req.body)) {
                 logger.logInfo("session_initialize");
-                const server = createMcpServer(client);
+                const server = createMcpServer(client, config);
                 transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
                     enableJsonResponse: !config.server.sseEnabled,

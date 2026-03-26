@@ -79,6 +79,8 @@ Current guardrails:
 - `BITBUCKET_API_TOKEN` is rejected if found in `.env`
 - runtime config is validated at startup with explicit bounds
 - MCP sessions have a safe TTL by default and a maximum in-memory capacity
+- optional API-key auth can protect `/health` and `/mcp` in shared environments
+- exposed write tools can be restricted through a runtime allowlist
 - `/health` returns a minimal runtime payload
 - `bb_api` is read-only and constrained to the configured repository scope
 
@@ -109,8 +111,10 @@ Important notes:
 
 - `BITBUCKET_API_TOKEN` must not be stored in `.env`
 - the token should be injected only at runtime
+- `MCP_BB_INTERNAL_API_KEY` is optional and must also be injected only at runtime
 - `MCP_BB_SESSION_TTL_MS` defaults to 30 minutes
 - `MCP_BB_MAX_SESSIONS` limits active in-memory sessions
+- `MCP_BB_ENABLED_WRITE_TOOLS` can disable selected write tools from the MCP surface
 - `BITBUCKET_DEFAULT_DESTINATION_BRANCH` can supply the default destination branch for PR creation
 
 ## Run
@@ -199,6 +203,13 @@ CI runs lint, formatting checks and tests on push and pull request.
     }
 }
 ```
+
+### Shared environment auth
+
+If `MCP_BB_INTERNAL_API_KEY` is configured, the server requires either:
+
+- `x-mcp-api-key: <secret>`
+- `Authorization: Bearer <secret>`
 
 ## Why Some Tools Are Missing
 
