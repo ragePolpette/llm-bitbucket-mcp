@@ -20,7 +20,6 @@ function startServer() {
             defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
             requestTimeoutMs: config.requestTimeoutMs,
             maxResponseBytes: config.maxResponseBytes,
-            cloneRoot: config.cloneRoot,
         });
         const app = createApp(config, sessions, client);
 
