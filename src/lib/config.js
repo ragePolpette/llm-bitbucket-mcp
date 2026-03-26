@@ -13,6 +13,7 @@ import {
     MAX_RESPONSE_BYTES,
     MIN_REQUEST_TIMEOUT_MS,
 } from "./runtime-policy.js";
+import { DEFAULT_ENABLED_WRITE_TOOLS, WRITE_TOOL_NAMES } from "./tool-policy.js";
 
 function toBool(value, fallback = false) {
     if (value === undefined || value === null || value === "") return fallback;
@@ -154,6 +155,22 @@ function validateEmail(value, key, errors) {
     }
 }
 
+function validateInternalApiKey(value, key, errors) {
+    if (value && value.length < 16) {
+        errors.push(`${key} deve essere lungo almeno 16 caratteri.`);
+    }
+}
+
+function validateEnabledWriteTools(writeTools, errors) {
+    for (const toolName of writeTools) {
+        if (!WRITE_TOOL_NAMES.has(toolName)) {
+            errors.push(
+                `MCP_BB_ENABLED_WRITE_TOOLS contiene '${toolName}', ma non e' un tool write supportato.`,
+            );
+        }
+    }
+}
+
 export function getConfigFromEnv(env = process.env) {
     const localFallback = getLocalHostFallback();
     const errors = [];
@@ -210,11 +227,18 @@ export function getConfigFromEnv(env = process.env) {
 
     const allowedHosts = parseCsvList(env.MCP_BB_ALLOWED_HOSTS, localFallback.allowedHosts);
     const allowedOrigins = parseCsvList(env.MCP_BB_ALLOWED_ORIGINS, localFallback.allowedOrigins);
+    const enabledWriteTools = parseCsvList(
+        env.MCP_BB_ENABLED_WRITE_TOOLS,
+        DEFAULT_ENABLED_WRITE_TOOLS,
+    );
     const serverPath = readTrimmed(env, "MCP_BB_PATH", DEFAULT_SERVER_PATH) || DEFAULT_SERVER_PATH;
+    const internalApiKey = readTrimmed(env, "MCP_BB_INTERNAL_API_KEY");
 
     validateAllowedList(allowedHosts, "MCP_BB_ALLOWED_HOSTS", errors);
     validateAllowedList(allowedOrigins, "MCP_BB_ALLOWED_ORIGINS", errors);
     validateServerPath(serverPath, errors);
+    validateInternalApiKey(internalApiKey, "MCP_BB_INTERNAL_API_KEY", errors);
+    validateEnabledWriteTools(enabledWriteTools, errors);
 
     if (errors.length) {
         throw new Error(`Configurazione non valida:\n- ${errors.join("\n- ")}`);
@@ -241,12 +265,17 @@ export function getConfigFromEnv(env = process.env) {
             allowedHosts,
             allowedOrigins,
         },
+        security: {
+            authEnabled: Boolean(internalApiKey),
+            internalApiKey,
+            enabledWriteTools,
+        },
     };
 }
 
 export function getConfig() {
     loadDotEnvFromCwd({
-        forbiddenKeys: ["BITBUCKET_API_TOKEN"],
+        forbiddenKeys: ["BITBUCKET_API_TOKEN", "MCP_BB_INTERNAL_API_KEY"],
     });
     return getConfigFromEnv(process.env);
 }

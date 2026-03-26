@@ -30,6 +30,15 @@ function createTestConfig() {
             allowedHosts: ["127.0.0.1", "localhost"],
             allowedOrigins: ["http://localhost:*"],
         },
+        security: {
+            authEnabled: false,
+            internalApiKey: "",
+            enabledWriteTools: [
+                "add_pull_request_comment",
+                "create_pull_request",
+                "open_pull_request",
+            ],
+        },
     };
 }
 
