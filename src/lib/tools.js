@@ -196,32 +196,6 @@ export const TOOLS = [
 
     // ── Utility tools ────────────────────────────────────────────
     {
-        name: "bb_clone",
-        description:
-            "Clona un repository Bitbucket in locale sotto la clone root configurata (SSH preferred, HTTPS fallback).",
-        annotations: { readOnlyHint: false },
-        inputSchema: {
-            type: "object",
-            properties: {
-                repoSlug: {
-                    type: "string",
-                    description:
-                        "Repository slug (es. 'bpopilot'). Validato: solo lettere, numeri, '.', '_', '-'.",
-                },
-                targetPath: {
-                    type: "string",
-                    description:
-                        "Path finale completo del clone, dentro la clone root configurata.",
-                },
-                workspaceSlug: {
-                    type: "string",
-                    description: "Workspace slug. Default: workspace da configurazione.",
-                },
-            },
-            required: ["repoSlug", "targetPath"],
-        },
-    },
-    {
         name: "bb_api",
         description:
             "Chiamata generica read-only all'API Bitbucket REST 2.0. Supporta solo GET per endpoint non coperti dai tool semantici.",
