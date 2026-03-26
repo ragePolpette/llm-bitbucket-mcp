@@ -1,17 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
-
 import { handleToolCall } from "../src/lib/handlers.js";
 import {
-    assertCloneBasePathAllowed,
-    BitbucketClient,
     isRepoScopedBitbucketApiPath,
     normalizeBitbucketApiPath,
 } from "../src/lib/bitbucket-client.js";
-import { resolveCloneRoot } from "../src/lib/config.js";
 
 test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
@@ -34,6 +27,7 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
     assert.equal(result.server, "llm-bitbucket-mcp");
     assert.ok(result.tool_map.discovery.includes("find_open_pull_request"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
+    assert.deepEqual(result.tool_map.utility, ["bb_api"]);
     assert.equal(result.runtime_options.default_destination_branch, "develop");
 });
 
@@ -332,48 +326,6 @@ test("repo scoped API path helper accepts only the configured repository", () =>
         isRepoScopedBitbucketApiPath("/repositories/ws/other/pipelines", "ws", "repo"),
         false,
     );
-});
-
-test("clone target path must stay within configured clone root", () => {
-    const cloneRoot = path.resolve("C:/tmp/bitbucket-clones");
-    const allowed = path.join(cloneRoot, "nested", "repo-name");
-    assert.equal(assertCloneBasePathAllowed(allowed, cloneRoot), allowed);
-
-    assert.throws(
-        () => assertCloneBasePathAllowed("C:/tmp/outside", cloneRoot),
-        /clone root configurata/,
-    );
-});
-
-test("clone target path is the final destination path", () => {
-    const cloneRoot = path.resolve("C:/tmp/bitbucket-clones");
-    const finalClonePath = path.join(cloneRoot, "team", "custom-repo-dir");
-    assert.equal(assertCloneBasePathAllowed(finalClonePath, cloneRoot), finalClonePath);
-});
-
-test("clone target path must not already exist", async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "llm-bb-mcp-clone-"));
-    const existingTarget = path.join(tempRoot, "repo");
-    fs.mkdirSync(existingTarget, { recursive: true });
-
-    const client = new BitbucketClient({
-        apiBase: "https://api.bitbucket.org",
-        workspace: "ws",
-        repoSlug: "repo",
-        userEmail: "dev@example.com",
-        apiToken: "token",
-        requestTimeoutMs: 30000,
-        maxResponseBytes: 1024,
-        cloneRoot: tempRoot,
-        defaultDestinationBranch: "",
-    });
-
-    await assert.rejects(() => client.clone("ws", "repo", existingTarget), /gia' esistente/);
-});
-
-test("default clone root resolves under current working directory", () => {
-    const cwd = "C:/workspace/llm-bitbucket-mcp";
-    assert.equal(resolveCloneRoot("", cwd), path.resolve(cwd, "_clones"));
 });
 
 test("create_pull_request rejects identical source and destination branches", async () => {

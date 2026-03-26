@@ -1,7 +1,3 @@
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-
 export class BitbucketApiError extends Error {
     constructor(status, statusText, body) {
         const msg = body?.error?.message || body?.error || statusText;
@@ -30,22 +26,6 @@ export function normalizeBitbucketApiPath(rawPath) {
     return apiPath;
 }
 
-export function isPathWithinRoot(candidatePath, rootPath) {
-    const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-export function assertCloneBasePathAllowed(targetPath, cloneRoot) {
-    const resolvedBase = path.resolve(targetPath);
-    const resolvedRoot = path.resolve(cloneRoot);
-    if (!isPathWithinRoot(resolvedBase, resolvedRoot)) {
-        throw new Error(
-            `targetPath non consentito: deve restare sotto la clone root configurata (${resolvedRoot}).`,
-        );
-    }
-    return resolvedBase;
-}
-
 export function isRepoScopedBitbucketApiPath(rawPath, workspace, repoSlug) {
     const normalizedPath = normalizeBitbucketApiPath(rawPath);
     const normalizedPrefix = normalizeBitbucketApiPath(`/repositories/${workspace}/${repoSlug}`);
@@ -61,7 +41,6 @@ export class BitbucketClient {
         apiToken,
         requestTimeoutMs,
         maxResponseBytes,
-        cloneRoot,
         defaultDestinationBranch,
     }) {
         this._apiBase = apiBase;
@@ -71,7 +50,6 @@ export class BitbucketClient {
         this._authHeader = "Basic " + Buffer.from(`${userEmail}:${apiToken}`).toString("base64");
         this._timeoutMs = requestTimeoutMs;
         this._maxBytes = maxResponseBytes;
-        this._cloneRoot = path.resolve(cloneRoot);
     }
 
     repoPath(suffix) {
@@ -158,66 +136,5 @@ export class BitbucketClient {
         }
 
         return responseBody;
-    }
-
-    async clone(workspaceSlug, repoSlug, targetPath) {
-        const slugPattern = /^[a-zA-Z0-9._-]+$/;
-        if (!slugPattern.test(repoSlug)) {
-            throw new Error(`repoSlug non valido: '${repoSlug}'. Pattern: ${slugPattern}`);
-        }
-        if (workspaceSlug && !slugPattern.test(workspaceSlug)) {
-            throw new Error(
-                `workspaceSlug non valido: '${workspaceSlug}'. Pattern: ${slugPattern}`,
-            );
-        }
-
-        const ws = workspaceSlug || this._workspace;
-        const dest = assertCloneBasePathAllowed(targetPath, this._cloneRoot);
-        if (fs.existsSync(dest)) {
-            throw new Error(`targetPath gia' esistente: '${dest}'. Scegli una directory nuova.`);
-        }
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-
-        const sshUrl = `git@bitbucket.org:${ws}/${repoSlug}.git`;
-        const httpsUrl = `https://bitbucket.org/${ws}/${repoSlug}.git`;
-
-        try {
-            await this._execGit(["clone", sshUrl, dest]);
-            return { success: true, protocol: "ssh", path: dest };
-        } catch (sshError) {
-            try {
-                await this._execGit(["clone", httpsUrl, dest]);
-                return { success: true, protocol: "https", path: dest };
-            } catch (httpsError) {
-                throw new Error(
-                    `Clone fallito via SSH e HTTPS. SSH: ${sshError.message} HTTPS: ${httpsError.message}`,
-                    { cause: httpsError },
-                );
-            }
-        }
-    }
-
-    _execGit(args) {
-        return new Promise((resolve, reject) => {
-            execFile(
-                "git",
-                args,
-                {
-                    timeout: 120000,
-                    env: {
-                        ...process.env,
-                        GIT_TERMINAL_PROMPT: "0",
-                        GCM_INTERACTIVE: "Never",
-                    },
-                },
-                (error, stdout, stderr) => {
-                    if (error) {
-                        reject(new Error(stderr || error.message));
-                    } else {
-                        resolve(stdout);
-                    }
-                },
-            );
-        });
     }
 }

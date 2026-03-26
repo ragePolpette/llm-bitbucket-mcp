@@ -89,7 +89,7 @@ Notes:
 - [x] Restringere `bb_api` a endpoint consentiti o a un perimetro esplicito
 - [x] Aggiungere validazione input runtime nei tool handler
 - [x] Introdurre limiti di lunghezza per input testuali sensibili
-- [x] Rendere `bb_clone` piu' prevedibile e non-interactive quando possibile
+- [x] Rendere i tool utility piu' prevedibili e con boundary piu' stretti
 - [x] Rivedere i default dei tool write per evitare comportamenti ambigui
 
 Definition of done:
@@ -156,11 +156,11 @@ Notes:
 - PR: `#10`
 - merged on: `2026-03-26`
 
-### P1.2 Safer Git And Clone Operations
+### P1.2 Tool Surface Simplification
 
-- [ ] Esplicitare meglio strategia SSH/HTTPS nel README
-- [ ] Gestire errori di clone in modo piu' pulito e prevedibile
-- [ ] Valutare opzione clone shallow o parametri controllati
+- [x] Rimuovere `bb_clone` dal surface MCP pubblico
+- [x] Eliminare config e runtime path residue legate al clone locale
+- [x] Allineare README, test e boundary di prodotto al focus su PR/API repository-scoped
 
 ### P1.3 Better Product Structure
 

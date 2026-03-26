@@ -17,7 +17,6 @@ The server exposes a focused Bitbucket MCP surface for:
 - pull request discovery and inspection
 - pull request comments
 - pull request creation
-- repository clone inside a controlled local clone root
 - a constrained read-only Bitbucket API escape hatch
 
 Current exposed tools:
@@ -31,7 +30,6 @@ Current exposed tools:
 - `add_pull_request_comment`
 - `create_pull_request`
 - `open_pull_request`
-- `bb_clone`
 - `bb_api`
 
 ## Scope And Non-Goals
@@ -41,7 +39,6 @@ This project intentionally keeps a narrow boundary.
 In scope:
 
 - Bitbucket Cloud read/write operations around pull requests
-- controlled local cloning for repository access
 - streamable HTTP MCP sessions for local tools and dashboards
 
 Out of scope:
@@ -62,7 +59,7 @@ The runtime is intentionally small:
 - [server.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/server.js): process bootstrap and startup error handling
 - [app.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/app.js): MCP HTTP app factory, session routing, CORS handling
 - [config.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/config.js): environment loading and runtime config validation
-- [bitbucket-client.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/bitbucket-client.js): Bitbucket REST client and controlled clone execution
+- [bitbucket-client.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/bitbucket-client.js): Bitbucket REST client and repository-scoped API helpers
 - [handlers.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/handlers.js): tool dispatcher and runtime input validation
 - [session-store.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/session-store.js): in-memory session lifecycle with TTL and capacity cap
 
@@ -77,8 +74,6 @@ Current guardrails:
 - MCP sessions have a safe TTL by default and a maximum in-memory capacity
 - `/health` returns a minimal runtime payload
 - `bb_api` is read-only and constrained to the configured repository scope
-- `bb_clone` is limited to a configured clone root and requires a new target directory
-- git clone execution is non-interactive
 
 This is the intended posture:
 
@@ -109,7 +104,6 @@ Important notes:
 - the token should be injected only at runtime
 - `MCP_BB_SESSION_TTL_MS` defaults to 30 minutes
 - `MCP_BB_MAX_SESSIONS` limits active in-memory sessions
-- `MCP_BB_CLONE_ROOT` defines the allowed clone root; if omitted it falls back to `_clones` in the project root
 - `BITBUCKET_DEFAULT_DESTINATION_BRANCH` can supply the default destination branch for PR creation
 
 ## Run
@@ -171,7 +165,7 @@ CI runs lint, formatting checks and tests on push and pull request.
     "tool": "add_pull_request_comment",
     "arguments": {
         "pr_id": 42,
-        "content": "Please double-check the clone fallback path."
+        "content": "Please double-check the migration note before merge."
     }
 }
 ```
@@ -208,7 +202,9 @@ Completed so far:
 - `P0.2 Config And Runtime Hardening`
 - `P0.3 API Boundary Hardening`
 - `P0.4 Test Expansion`
-
-Next step:
-
 - `P0.5 README And Portfolio Polish`
+- `P1.1 Observability Lite`
+
+Current next step:
+
+- `P1.2 Tool Surface Simplification`
