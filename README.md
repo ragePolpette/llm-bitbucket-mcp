@@ -56,10 +56,13 @@ The idea is simple: remote Bitbucket actions stay here, local git workflow stays
 
 The runtime is intentionally small:
 
-- [server.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/server.js): process bootstrap and startup error handling
+- [server.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/server.js): minimal CLI entrypoint
+- [runtime.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/runtime.js): bootstrap wiring for config, sessions, Bitbucket client and HTTP startup
 - [app.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/app.js): MCP HTTP app factory, session routing, CORS handling
 - [config.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/config.js): environment loading and runtime config validation
+- [runtime-policy.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/runtime-policy.js): shared runtime constants and HTTP/security policy
 - [bitbucket-client.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/bitbucket-client.js): Bitbucket REST client and repository-scoped API helpers
+- [tool-policy.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/tool-policy.js): shared tool contracts and validation limits
 - [handlers.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/handlers.js): tool dispatcher and runtime input validation
 - [session-store.js](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/src/lib/session-store.js): in-memory session lifecycle with TTL and capacity cap
 

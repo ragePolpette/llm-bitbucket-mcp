@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createSessionStore } from "../src/lib/session-store.js";
 import { createApp } from "../src/lib/app.js";
+import { HEALTH_ENDPOINT, MCP_SESSION_HEADER } from "../src/lib/runtime-policy.js";
 
 function createTestConfig() {
     return {
@@ -60,7 +61,7 @@ async function withTestServer(run) {
 
 test("health endpoint returns the minimal runtime payload", async () => {
     await withTestServer(async ({ baseUrl }) => {
-        const response = await fetch(`${baseUrl}/health`);
+        const response = await fetch(`${baseUrl}${HEALTH_ENDPOINT}`);
         const payload = await response.json();
 
         assert.equal(response.status, 200);
@@ -128,7 +129,7 @@ test("POST /mcp returns invalid session when the session id is unknown", async (
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "mcp-session-id": "missing-session",
+                [MCP_SESSION_HEADER]: "missing-session",
             },
             body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
         });
