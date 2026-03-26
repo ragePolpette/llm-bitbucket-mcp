@@ -198,9 +198,15 @@ Questa fase non e' necessaria subito, ma tiene aperta la direzione giusta.
 
 ### P2.1 Security And Governance
 
-- [ ] API key interna o auth leggera per ambienti condivisi
-- [ ] Audit trail piu' completo per operazioni write
-- [ ] Policy piu' rigide su tool sensibili
+- [x] API key interna o auth leggera per ambienti condivisi
+- [x] Audit trail piu' completo per operazioni write
+- [x] Policy piu' rigide su tool sensibili
+
+Notes:
+
+- branch: `feature/security-governance`
+- PR: `#14`
+- merged on: `2026-03-26`
 
 ### P2.2 Packaging And Distribution
 

@@ -236,7 +236,8 @@ Completed so far:
 - `P1.2 Tool Surface Simplification`
 - `P1.3 Better Product Structure`
 - `P1.4 More Complete Tool Surface`
+- `P2.1 Security And Governance`
 
 Current next step:
 
-- `P2.1 Security And Governance`
+- `P2.2 Packaging And Distribution`
