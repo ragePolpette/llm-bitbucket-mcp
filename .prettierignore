@@ -3,3 +3,5 @@ package-lock.json
 _clones/
 .pytest_cache/
 HARNESS_IMPLEMENTATION_PROMPT.md
+AGENTS.md
+CLAUDE.md

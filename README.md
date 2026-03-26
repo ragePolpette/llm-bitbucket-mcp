@@ -137,9 +137,27 @@ npm run lint
 npm run format:check
 npm test
 npm run check
+npm run docker:build
 ```
 
 CI runs lint, formatting checks and tests on push and pull request.
+
+## Packaging
+
+This repo now ships with:
+
+- a minimal [Dockerfile](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/Dockerfile) for local/internal distribution
+- a small [.dockerignore](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/.dockerignore) to keep build context tight
+- a [CHANGELOG.md](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/CHANGELOG.md) for release notes
+- a [RELEASE.md](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/RELEASE.md) file that defines the release process
+
+Build the local image with:
+
+```bash
+npm run docker:build
+```
+
+Runtime secrets still stay outside the image and outside repo files.
 
 ## Usage Examples
 
@@ -237,7 +255,8 @@ Completed so far:
 - `P1.3 Better Product Structure`
 - `P1.4 More Complete Tool Surface`
 - `P2.1 Security And Governance`
+- `P2.2 Packaging And Distribution`
 
 Current next step:
 
-- `P2.2 Packaging And Distribution`
+- `P2.3 Advanced Reliability`
