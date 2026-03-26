@@ -1,15 +1,18 @@
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-
-const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
-const MIN_REQUEST_TIMEOUT_MS = 5000;
-const MAX_REQUEST_TIMEOUT_MS = 120000;
-const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
-const DEFAULT_MAX_SESSIONS = 100;
-const DEFAULT_PORT = 8783;
-const MAX_PORT = 65535;
-const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+import {
+    DEFAULT_MAX_SESSIONS,
+    DEFAULT_PORT,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_PATH,
+    DEFAULT_SESSION_TTL_MS,
+    MAX_PORT,
+    MAX_REQUEST_TIMEOUT_MS,
+    MAX_RESPONSE_BYTES,
+    MIN_REQUEST_TIMEOUT_MS,
+} from "./runtime-policy.js";
 
 function toBool(value, fallback = false) {
     if (value === undefined || value === null || value === "") return fallback;
@@ -207,7 +210,7 @@ export function getConfigFromEnv(env = process.env) {
 
     const allowedHosts = parseCsvList(env.MCP_BB_ALLOWED_HOSTS, localFallback.allowedHosts);
     const allowedOrigins = parseCsvList(env.MCP_BB_ALLOWED_ORIGINS, localFallback.allowedOrigins);
-    const serverPath = readTrimmed(env, "MCP_BB_PATH", "/mcp") || "/mcp";
+    const serverPath = readTrimmed(env, "MCP_BB_PATH", DEFAULT_SERVER_PATH) || DEFAULT_SERVER_PATH;
 
     validateAllowedList(allowedHosts, "MCP_BB_ALLOWED_HOSTS", errors);
     validateAllowedList(allowedOrigins, "MCP_BB_ALLOWED_ORIGINS", errors);
@@ -231,7 +234,7 @@ export function getConfigFromEnv(env = process.env) {
         sessionTtlMs,
         maxSessions,
         server: {
-            host: readTrimmed(env, "MCP_BB_HOST", "127.0.0.1") || "127.0.0.1",
+            host: readTrimmed(env, "MCP_BB_HOST", DEFAULT_SERVER_HOST) || DEFAULT_SERVER_HOST,
             port,
             path: serverPath,
             sseEnabled: toBool(env.MCP_BB_SSE_ENABLED, false),
