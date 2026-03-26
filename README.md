@@ -109,9 +109,9 @@ Use [`.env.example`](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/.en
 
 Important notes:
 
-- `BITBUCKET_API_TOKEN` must not be stored in `.env`
-- the token should be injected only at runtime
-- `MCP_BB_INTERNAL_API_KEY` is optional and must also be injected only at runtime
+- `BITBUCKET_API_TOKEN` must not be stored in `.env` or in any file under this repo
+- `MCP_BB_INTERNAL_API_KEY` is optional and must also stay out of repo files
+- both values are expected only at runtime, either from the `.ps1` launcher or from the local dashboard in [mcp-dashboard](/C:/Users/Gianmarco/Urgewalt/Yetzirah/mcp-dashboard)
 - `MCP_BB_SESSION_TTL_MS` defaults to 30 minutes
 - `MCP_BB_MAX_SESSIONS` limits active in-memory sessions
 - `MCP_BB_ENABLED_WRITE_TOOLS` can disable selected write tools from the MCP surface
@@ -208,8 +208,8 @@ CI runs lint, formatting checks and tests on push and pull request.
 
 If `MCP_BB_INTERNAL_API_KEY` is configured, the server requires either:
 
-- `x-mcp-api-key: <secret>`
-- `Authorization: Bearer <secret>`
+- `x-mcp-api-key` with the runtime-injected value
+- `Authorization: Bearer` with the same runtime-injected value
 
 ## Why Some Tools Are Missing
 
