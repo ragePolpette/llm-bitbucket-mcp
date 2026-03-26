@@ -1,3 +1,5 @@
+import { DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_TTL_MS } from "./runtime-policy.js";
+
 export class SessionStoreCapacityError extends Error {
     constructor(maxSessions) {
         super(`Limite sessioni raggiunto: massimo ${maxSessions} sessioni attive.`);
@@ -6,7 +8,10 @@ export class SessionStoreCapacityError extends Error {
     }
 }
 
-export function createSessionStore({ ttlMs = 30 * 60 * 1000, maxSessions = 100 } = {}) {
+export function createSessionStore({
+    ttlMs = DEFAULT_SESSION_TTL_MS,
+    maxSessions = DEFAULT_MAX_SESSIONS,
+} = {}) {
     const sessions = new Map();
     const ttlEnabled = Number(ttlMs) > 0;
     const capacity = Number(maxSessions) > 0 ? Number(maxSessions) : 100;

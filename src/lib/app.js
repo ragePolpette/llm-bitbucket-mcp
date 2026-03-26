@@ -12,6 +12,17 @@ import { handleToolCall } from "./handlers.js";
 import * as logger from "./logger.js";
 import { applyJsonAcceptCompatibility } from "./accept-compat.js";
 import { buildHealthPayload } from "./health.js";
+import {
+    CORS_ALLOWED_HEADERS,
+    CORS_ALLOWED_METHODS,
+    HEALTH_ENDPOINT,
+    MCP_SESSION_HEADER,
+    SERVER_NAME,
+    SERVER_VERSION,
+    createJsonRpcErrorResponse,
+    isOriginAllowed,
+    normalizeHeaderValue,
+} from "./runtime-policy.js";
 
 function asTextResult(payload) {
     return {
@@ -21,7 +32,7 @@ function asTextResult(payload) {
 
 function createMcpServer(client) {
     const server = new Server(
-        { name: "llm-bitbucket-mcp", version: "1.0.0" },
+        { name: SERVER_NAME, version: SERVER_VERSION },
         { capabilities: { tools: {} } },
     );
 
@@ -60,38 +71,6 @@ function createMcpServer(client) {
     return server;
 }
 
-function normalizeHeaderValue(rawValue) {
-    if (Array.isArray(rawValue)) return typeof rawValue[0] === "string" ? rawValue[0].trim() : "";
-    return typeof rawValue === "string" ? rawValue.trim() : "";
-}
-
-function normalizeOrigin(origin) {
-    try {
-        const parsed = new URL(origin);
-        const protocol = parsed.protocol.toLowerCase();
-        const host = parsed.hostname.toLowerCase();
-        if (!["http:", "https:"].includes(protocol) || !host) return null;
-        return parsed.port ? `${protocol}//${host}:${parsed.port}` : `${protocol}//${host}`;
-    } catch {
-        return null;
-    }
-}
-
-function isOriginAllowed(origin, allowedOrigins) {
-    const normalizedOrigin = normalizeOrigin(origin);
-    if (!normalizedOrigin) return false;
-    for (const rawPattern of allowedOrigins) {
-        const pattern = String(rawPattern || "")
-            .trim()
-            .toLowerCase();
-        if (!pattern) continue;
-        if (pattern === normalizedOrigin) return true;
-        if (pattern.endsWith(":*") && normalizedOrigin.startsWith(`${pattern.slice(0, -2)}:`))
-            return true;
-    }
-    return false;
-}
-
 function withOriginValidation(req, res, next, config) {
     const origin = normalizeHeaderValue(req.headers.origin);
     if (!origin) {
@@ -109,12 +88,12 @@ function withOriginValidation(req, res, next, config) {
 }
 
 function createErrorResponse(message) {
-    return { jsonrpc: "2.0", error: { code: -32000, message }, id: null };
+    return createJsonRpcErrorResponse(message);
 }
 
 function sendCorsPreflight(res) {
-    res.set("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Accept, mcp-session-id");
+    res.set("Access-Control-Allow-Methods", CORS_ALLOWED_METHODS);
+    res.set("Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS);
     res.set("Access-Control-Max-Age", "600");
     res.status(204).send();
 }
@@ -163,7 +142,7 @@ export function createApp(config, sessions, client) {
     });
     app.options(config.server.path, (_req, res) => sendCorsPreflight(res));
 
-    app.get("/health", (_req, res) => {
+    app.get(HEALTH_ENDPOINT, (_req, res) => {
         logger.logInfo("health_check");
         res.json(
             buildHealthPayload({
@@ -175,7 +154,7 @@ export function createApp(config, sessions, client) {
     });
 
     app.post(config.server.path, async (req, res) => {
-        const rawSessionId = req.headers["mcp-session-id"];
+        const rawSessionId = req.headers[MCP_SESSION_HEADER];
         const sessionId = normalizeHeaderValue(rawSessionId);
         const hasSessionHeader = rawSessionId !== undefined;
         let transport;
@@ -224,7 +203,7 @@ export function createApp(config, sessions, client) {
             res.status(405).set("Allow", "POST, DELETE").send("Method Not Allowed");
             return;
         }
-        const rawSessionId = req.headers["mcp-session-id"];
+        const rawSessionId = req.headers[MCP_SESSION_HEADER];
         if (rawSessionId === undefined) {
             sendMissingSession(res);
             return;
@@ -244,7 +223,7 @@ export function createApp(config, sessions, client) {
     });
 
     app.delete(config.server.path, async (req, res) => {
-        const rawSessionId = req.headers["mcp-session-id"];
+        const rawSessionId = req.headers[MCP_SESSION_HEADER];
         if (rawSessionId === undefined) {
             sendMissingSession(res);
             return;

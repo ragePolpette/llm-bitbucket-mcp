@@ -1,15 +1,6 @@
 import * as logger from "./logger.js";
 import { isRepoScopedBitbucketApiPath, normalizeBitbucketApiPath } from "./bitbucket-client.js";
-
-const MAX_BRANCH_NAME_LENGTH = 255;
-const MAX_TITLE_LENGTH = 200;
-const MAX_DESCRIPTION_LENGTH = 10000;
-const MAX_COMMENT_LENGTH = 10000;
-const MAX_FILE_PATH_LENGTH = 500;
-const MAX_REVIEWERS = 10;
-const MAX_QUERY_PARAMS = 20;
-const MAX_QUERY_VALUE_LENGTH = 200;
-const ALLOWED_PR_STATES = new Set(["OPEN", "MERGED", "DECLINED", "SUPERSEDED"]);
+import { ALLOWED_PR_STATES, TOOL_LIMITS } from "./tool-policy.js";
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
@@ -81,7 +72,7 @@ function handleBitbucketInfo(client) {
 async function handleListPRs(args, client) {
     validateOptionalEnum(args.state, "state", ALLOWED_PR_STATES);
     validateOptionalString(args.source_branch, "source_branch", {
-        maxLength: MAX_BRANCH_NAME_LENGTH,
+        maxLength: TOOL_LIMITS.branchNameLength,
     });
     validateOptionalInteger(args.page, "page", { min: 1 });
     validateOptionalInteger(args.pagelen, "pagelen", { min: 1, max: 50 });
@@ -95,9 +86,9 @@ async function handleListPRs(args, client) {
 }
 
 async function handleFindOpenPR(args, client) {
-    requireStringParam(args, "source_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
+    requireStringParam(args, "source_branch", { maxLength: TOOL_LIMITS.branchNameLength });
     validateOptionalString(args.destination_branch, "destination_branch", {
-        maxLength: MAX_BRANCH_NAME_LENGTH,
+        maxLength: TOOL_LIMITS.branchNameLength,
     });
     validateOptionalInteger(args.pagelen, "pagelen", { min: 1, max: 50 });
 
@@ -244,7 +235,7 @@ async function handleGetPRComments(args, client) {
 
 async function handleAddPRComment(args, client) {
     requirePositiveIntegerParam(args, "pr_id");
-    requireStringParam(args, "content", { maxLength: MAX_COMMENT_LENGTH });
+    requireStringParam(args, "content", { maxLength: TOOL_LIMITS.commentLength });
     validateInlineCommentArgs(args);
 
     const body = { content: { raw: args.content } };
@@ -283,9 +274,11 @@ async function handleAddPRComment(args, client) {
 }
 
 async function handleCreatePR(args, client) {
-    requireStringParam(args, "title", { maxLength: MAX_TITLE_LENGTH });
-    requireStringParam(args, "source_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
-    validateOptionalString(args.description, "description", { maxLength: MAX_DESCRIPTION_LENGTH });
+    requireStringParam(args, "title", { maxLength: TOOL_LIMITS.titleLength });
+    requireStringParam(args, "source_branch", { maxLength: TOOL_LIMITS.branchNameLength });
+    validateOptionalString(args.description, "description", {
+        maxLength: TOOL_LIMITS.descriptionLength,
+    });
     validateOptionalBoolean(args.close_source_branch, "close_source_branch");
     validateReviewerList(args.reviewers);
 
@@ -298,7 +291,9 @@ async function handleCreatePR(args, client) {
                 "Passalo esplicitamente oppure configura BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
         );
     }
-    validateString(destinationBranch, "destination_branch", { maxLength: MAX_BRANCH_NAME_LENGTH });
+    validateString(destinationBranch, "destination_branch", {
+        maxLength: TOOL_LIMITS.branchNameLength,
+    });
     if (destinationBranch === args.source_branch) {
         throw new Error("source_branch e destination_branch non possono coincidere.");
     }
@@ -527,11 +522,11 @@ function validateReviewerList(reviewers) {
     if (!Array.isArray(reviewers)) {
         throw new Error("reviewers deve essere un array di stringhe.");
     }
-    if (reviewers.length > MAX_REVIEWERS) {
-        throw new Error(`reviewers supera il massimo consentito (${MAX_REVIEWERS}).`);
+    if (reviewers.length > TOOL_LIMITS.reviewers) {
+        throw new Error(`reviewers supera il massimo consentito (${TOOL_LIMITS.reviewers}).`);
     }
     for (const reviewer of reviewers) {
-        validateString(reviewer, "reviewers[]", { maxLength: 100 });
+        validateString(reviewer, "reviewers[]", { maxLength: TOOL_LIMITS.reviewerIdLength });
     }
     return reviewers;
 }
@@ -544,7 +539,7 @@ function validateInlineCommentArgs(args) {
         throw new Error("Per i commenti inline devi passare sia file_path sia line_to.");
     }
     if (hasFilePath) {
-        validateString(args.file_path, "file_path", { maxLength: MAX_FILE_PATH_LENGTH });
+        validateString(args.file_path, "file_path", { maxLength: TOOL_LIMITS.filePathLength });
         validateInteger(args.line_to, "line_to", { min: 1 });
     }
 }
@@ -555,18 +550,18 @@ function validateQueryParams(queryParams) {
         throw new Error("queryParams deve essere un oggetto chiave/valore.");
     }
     const entries = Object.entries(queryParams);
-    if (entries.length > MAX_QUERY_PARAMS) {
-        throw new Error(`queryParams supera il massimo consentito (${MAX_QUERY_PARAMS}).`);
+    if (entries.length > TOOL_LIMITS.queryParams) {
+        throw new Error(`queryParams supera il massimo consentito (${TOOL_LIMITS.queryParams}).`);
     }
     for (const [key, value] of entries) {
-        validateString(key, "queryParams key", { maxLength: 100 });
+        validateString(key, "queryParams key", { maxLength: TOOL_LIMITS.queryKeyLength });
         const scalar = String(value ?? "").trim();
         if (!scalar) {
             throw new Error(`queryParams['${key}'] non puo' essere vuoto.`);
         }
-        if (scalar.length > MAX_QUERY_VALUE_LENGTH) {
+        if (scalar.length > TOOL_LIMITS.queryValueLength) {
             throw new Error(
-                `queryParams['${key}'] supera la lunghezza massima consentita (${MAX_QUERY_VALUE_LENGTH}).`,
+                `queryParams['${key}'] supera la lunghezza massima consentita (${TOOL_LIMITS.queryValueLength}).`,
             );
         }
     }
