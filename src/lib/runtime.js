@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { BitbucketClient } from "./bitbucket-client.js";
 import { getConfig } from "./config.js";
 import * as logger from "./logger.js";
+import { createRuntimeMetrics } from "./runtime-metrics.js";
 import { createSessionStore } from "./session-store.js";
 
 export function createSessionStoreFromConfig(config) {
@@ -11,7 +12,7 @@ export function createSessionStoreFromConfig(config) {
     });
 }
 
-export function createBitbucketClientFromConfig(config) {
+export function createBitbucketClientFromConfig(config, metrics) {
     return new BitbucketClient({
         apiBase: config.bitbucket.apiBase,
         workspace: config.bitbucket.workspace,
@@ -20,24 +21,34 @@ export function createBitbucketClientFromConfig(config) {
         apiToken: config.bitbucket.apiToken,
         defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
         requestTimeoutMs: config.requestTimeoutMs,
+        retryMaxAttempts: config.retry.maxAttempts,
+        retryBaseDelayMs: config.retry.baseDelayMs,
         maxResponseBytes: config.maxResponseBytes,
+        metrics,
     });
+}
+
+export function createMetricsFromConfig() {
+    return createRuntimeMetrics();
 }
 
 export function createRuntime(
     config,
     {
+        createMetrics = createMetricsFromConfig,
         createSessions = createSessionStoreFromConfig,
         createClient = createBitbucketClientFromConfig,
         createHttpApp = createApp,
     } = {},
 ) {
+    const metrics = createMetrics(config);
     const sessions = createSessions(config);
-    const client = createClient(config);
-    const app = createHttpApp(config, sessions, client);
+    const client = createClient(config, metrics);
+    const app = createHttpApp(config, sessions, client, metrics);
 
     return {
         config,
+        metrics,
         sessions,
         client,
         app,
@@ -66,6 +77,8 @@ export function logServerStarted(config) {
         host: config.server.host,
         port: config.server.port,
         path: config.server.path,
+        retry_max_attempts: config.retry.maxAttempts,
+        retry_base_delay_ms: config.retry.baseDelayMs,
         max_sessions: config.maxSessions,
         session_ttl_ms: config.sessionTtlMs,
     });

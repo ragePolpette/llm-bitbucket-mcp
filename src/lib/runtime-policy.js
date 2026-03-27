@@ -5,6 +5,7 @@ export const SERVER_VERSION = "1.0.0";
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PATH = "/mcp";
 export const HEALTH_ENDPOINT = "/health";
+export const METRICS_ENDPOINT = "/metrics";
 export const MCP_SESSION_HEADER = "mcp-session-id";
 export const MCP_API_KEY_HEADER = "x-mcp-api-key";
 export const AUTHORIZATION_HEADER = "authorization";
@@ -21,6 +22,12 @@ export const DEFAULT_MAX_SESSIONS = 100;
 export const DEFAULT_PORT = 8783;
 export const MAX_PORT = 65535;
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+export const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+export const MIN_RETRY_MAX_ATTEMPTS = 1;
+export const MAX_RETRY_MAX_ATTEMPTS = 5;
+export const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+export const MIN_RETRY_BASE_DELAY_MS = 50;
+export const MAX_RETRY_BASE_DELAY_MS = 5_000;
 
 export function normalizeHeaderValue(rawValue) {
     if (Array.isArray(rawValue)) {
