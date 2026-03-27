@@ -82,6 +82,8 @@ Current guardrails:
 - optional API-key auth can protect `/health` and `/mcp` in shared environments
 - exposed write tools can be restricted through a runtime allowlist
 - `/health` returns a minimal runtime payload
+- transient Bitbucket read failures use bounded retry/backoff
+- `/metrics` exposes essential runtime counters for local/internal troubleshooting
 - `bb_api` is read-only and constrained to the configured repository scope
 
 This is the intended posture:
@@ -114,6 +116,7 @@ Important notes:
 - both values are expected only at runtime, either from the `.ps1` launcher or from the local dashboard in [mcp-dashboard](/C:/Users/Gianmarco/Urgewalt/Yetzirah/mcp-dashboard)
 - `MCP_BB_SESSION_TTL_MS` defaults to 30 minutes
 - `MCP_BB_MAX_SESSIONS` limits active in-memory sessions
+- `MCP_BB_RETRY_MAX_ATTEMPTS` and `MCP_BB_RETRY_BASE_DELAY_MS` tune Bitbucket GET retry behavior
 - `MCP_BB_ENABLED_WRITE_TOOLS` can disable selected write tools from the MCP surface
 - `BITBUCKET_DEFAULT_DESTINATION_BRANCH` can supply the default destination branch for PR creation
 
@@ -126,6 +129,7 @@ npm start
 Endpoints:
 
 - health: `http://127.0.0.1:8783/health`
+- metrics: `http://127.0.0.1:8783/metrics`
 - MCP: `http://127.0.0.1:8783/mcp`
 
 ## Quality Gates
@@ -256,7 +260,8 @@ Completed so far:
 - `P1.4 More Complete Tool Surface`
 - `P2.1 Security And Governance`
 - `P2.2 Packaging And Distribution`
+- `P2.3 Advanced Reliability`
 
 Current next step:
 
-- `P2.3 Advanced Reliability`
+- roadmap complete for the current internal-grade target

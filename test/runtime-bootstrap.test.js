@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
     createBitbucketClientFromConfig,
+    createMetricsFromConfig,
     createRuntime,
     createSessionStoreFromConfig,
     startServer,
@@ -19,6 +20,10 @@ function createTestConfig() {
             defaultDestinationBranch: "main",
         },
         requestTimeoutMs: 30_000,
+        retry: {
+            maxAttempts: 3,
+            baseDelayMs: 250,
+        },
         maxResponseBytes: 1024,
         sessionTtlMs: 60_000,
         maxSessions: 10,
@@ -58,35 +63,51 @@ test("createBitbucketClientFromConfig maps runtime Bitbucket settings", () => {
     });
 });
 
+test("createMetricsFromConfig creates runtime counters", () => {
+    const metrics = createMetricsFromConfig(createTestConfig());
+    const snapshot = metrics.snapshot();
+
+    assert.equal(snapshot.http.requestsTotal, 0);
+    assert.equal(snapshot.tools.callsTotal, 0);
+    assert.equal(snapshot.bitbucket.requestsTotal, 0);
+});
+
 test("createRuntime wires config, sessions, client and app through injectable factories", () => {
     const config = createTestConfig();
     const calls = [];
+    const metrics = { kind: "metrics" };
     const sessions = { kind: "sessions" };
     const client = { kind: "client" };
     const app = { kind: "app" };
 
     const runtime = createRuntime(config, {
+        createMetrics(receivedConfig) {
+            calls.push(["metrics", receivedConfig]);
+            return metrics;
+        },
         createSessions(receivedConfig) {
             calls.push(["sessions", receivedConfig]);
             return sessions;
         },
-        createClient(receivedConfig) {
-            calls.push(["client", receivedConfig]);
+        createClient(receivedConfig, receivedMetrics) {
+            calls.push(["client", receivedConfig, receivedMetrics]);
             return client;
         },
-        createHttpApp(receivedConfig, receivedSessions, receivedClient) {
-            calls.push(["app", receivedConfig, receivedSessions, receivedClient]);
+        createHttpApp(receivedConfig, receivedSessions, receivedClient, receivedMetrics) {
+            calls.push(["app", receivedConfig, receivedSessions, receivedClient, receivedMetrics]);
             return app;
         },
     });
 
     assert.deepEqual(calls, [
+        ["metrics", config],
         ["sessions", config],
-        ["client", config],
-        ["app", config, sessions, client],
+        ["client", config, metrics],
+        ["app", config, sessions, client, metrics],
     ]);
     assert.deepEqual(runtime, {
         config,
+        metrics,
         sessions,
         client,
         app,
@@ -95,7 +116,7 @@ test("createRuntime wires config, sessions, client and app through injectable fa
 
 test("startServer composes runtime bootstrap and startup hooks without process globals", async () => {
     const config = createTestConfig();
-    const runtime = { config, app: { kind: "app" }, sessions: {}, client: {} };
+    const runtime = { config, app: { kind: "app" }, sessions: {}, client: {}, metrics: {} };
     const server = { close() {} };
     const events = [];
 

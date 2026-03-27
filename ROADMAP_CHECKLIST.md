@@ -222,9 +222,15 @@ Notes:
 
 ### P2.3 Advanced Reliability
 
-- [ ] retry/backoff mirato per Bitbucket API
-- [ ] metriche runtime essenziali
-- [ ] test di integrazione contro sandbox controllata
+- [x] retry/backoff mirato per Bitbucket API
+- [x] metriche runtime essenziali
+- [x] test di integrazione contro sandbox controllata
+
+Notes:
+
+- branch: `feature/advanced-reliability`
+- PR: `#17`
+- merged on: `2026-03-27`
 
 ## First Development Slice
 
