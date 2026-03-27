@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 
 import { createSessionStore } from "../src/lib/session-store.js";
 import { createApp } from "../src/lib/app.js";
-import { HEALTH_ENDPOINT, MCP_SESSION_HEADER } from "../src/lib/runtime-policy.js";
+import { createRuntimeMetrics } from "../src/lib/runtime-metrics.js";
+import {
+    HEALTH_ENDPOINT,
+    MCP_SESSION_HEADER,
+    METRICS_ENDPOINT,
+} from "../src/lib/runtime-policy.js";
 
 function createTestConfig() {
     return {
@@ -45,11 +50,12 @@ async function withTestServer(run, configOverrides = {}) {
         },
     };
     const sessions = createSessionStore({ ttlMs: 60_000, maxSessions: 10 });
+    const metrics = createRuntimeMetrics();
     const client = {
         defaultDestinationBranch: "",
         repoScope: { workspace: "ws", repoSlug: "repo" },
     };
-    const app = createApp(config, sessions, client);
+    const app = createApp(config, sessions, client, metrics);
 
     const server = await new Promise((resolve, reject) => {
         const instance = app.listen(0, config.server.host, (error) => {
@@ -201,4 +207,29 @@ test("POST /mcp accepts the configured API key header when auth is enabled", asy
             },
         },
     );
+});
+
+test("metrics endpoint exposes essential runtime counters", async () => {
+    await withTestServer(async ({ baseUrl }) => {
+        await fetch(`${baseUrl}${HEALTH_ENDPOINT}`);
+        await fetch(`${baseUrl}/mcp`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
+        });
+
+        const response = await fetch(`${baseUrl}${METRICS_ENDPOINT}`);
+        const payload = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(payload.status, "ok");
+        assert.equal(payload.server, "llm-bitbucket-mcp");
+        assert.equal(payload.activeSessions, 0);
+        assert.equal(payload.metrics.http.methods.GET >= 2, true);
+        assert.equal(payload.metrics.http.methods.POST >= 1, true);
+        assert.equal(payload.metrics.http.statusBuckets["2xx"] >= 1, true);
+        assert.equal(payload.metrics.http.statusBuckets["4xx"] >= 1, true);
+    });
 });
