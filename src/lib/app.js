@@ -18,6 +18,7 @@ import {
     HEALTH_ENDPOINT,
     MCP_API_KEY_HEADER,
     MCP_SESSION_HEADER,
+    METRICS_ENDPOINT,
     SERVER_NAME,
     SERVER_VERSION,
     createJsonRpcErrorResponse,
@@ -35,7 +36,7 @@ function asTextResult(payload) {
     };
 }
 
-function createMcpServer(client, config) {
+function createMcpServer(client, config, metrics) {
     const enabledTools = getEnabledTools(config.security.enabledWriteTools);
     const enabledToolNames = getEnabledToolNames(config.security.enabledWriteTools);
     const server = new Server(
@@ -56,11 +57,13 @@ function createMcpServer(client, config) {
                 throw new Error(`Tool non esposto dal surface MCP corrente: ${name}`);
             }
             const result = await handleToolCall(name, args, client, config.security);
+            metrics?.recordToolCall(name, "success");
             if (isWriteTool) {
                 logger.logAudit("write_tool_success", { tool: name });
             }
             return asTextResult(result);
         } catch (error) {
+            metrics?.recordToolCall(name, "failure");
             if (isWriteTool) {
                 logger.logAudit("write_tool_failure", {
                     tool: name,
@@ -159,7 +162,17 @@ function sendRuntimeError(res, error) {
     }
 }
 
-export function createApp(config, sessions, client) {
+function buildMetricsPayload({ metrics, sessions, uptimeSec }) {
+    return {
+        status: "ok",
+        server: SERVER_NAME,
+        uptimeSec,
+        activeSessions: sessions.size(),
+        metrics: metrics?.snapshot?.() || {},
+    };
+}
+
+export function createApp(config, sessions, client, metrics) {
     const app = createMcpExpressApp({
         host: config.server.host,
         allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
@@ -176,6 +189,11 @@ export function createApp(config, sessions, client) {
             next,
         ),
     );
+    app.use((req, res, next) => {
+        metrics?.recordHttpRequest(req.method);
+        res.once("finish", () => metrics?.recordHttpResponse(res.statusCode));
+        next();
+    });
     app.use((req, res, next) => withApiKeyAuth(req, res, next, config));
     app.use((req, res, next) => withOriginValidation(req, res, next, config));
     app.use((req, _res, next) => {
@@ -191,6 +209,17 @@ export function createApp(config, sessions, client) {
         res.json(
             buildHealthPayload({
                 endpoint: config.server.path,
+                sessions,
+                uptimeSec: Math.floor(process.uptime()),
+            }),
+        );
+    });
+
+    app.get(METRICS_ENDPOINT, (_req, res) => {
+        logger.logInfo("metrics_read");
+        res.json(
+            buildMetricsPayload({
+                metrics,
                 sessions,
                 uptimeSec: Math.floor(process.uptime()),
             }),
@@ -221,7 +250,7 @@ export function createApp(config, sessions, client) {
 
             if (!sessionId && isInitializeRequest(req.body)) {
                 logger.logInfo("session_initialize");
-                const server = createMcpServer(client, config);
+                const server = createMcpServer(client, config, metrics);
                 transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
                     enableJsonResponse: !config.server.sseEnabled,

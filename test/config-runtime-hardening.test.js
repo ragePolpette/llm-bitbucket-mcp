@@ -20,6 +20,8 @@ test("getConfigFromEnv applies safe runtime defaults", () => {
     assert.equal(config.sessionTtlMs, 30 * 60 * 1000);
     assert.equal(config.maxSessions, 100);
     assert.equal(config.requestTimeoutMs, 30000);
+    assert.equal(config.retry.maxAttempts, 3);
+    assert.equal(config.retry.baseDelayMs, 250);
     assert.equal(config.server.path, DEFAULT_SERVER_PATH);
     assert.equal(config.security.authEnabled, false);
     assert.deepEqual(config.security.enabledWriteTools, [
@@ -38,6 +40,8 @@ test("getConfigFromEnv reports aggregated validation errors", () => {
                 MCP_BB_PATH: "mcp",
                 MCP_BB_SESSION_TTL_MS: "500",
                 MCP_BB_MAX_SESSIONS: "0",
+                MCP_BB_RETRY_MAX_ATTEMPTS: "0",
+                MCP_BB_RETRY_BASE_DELAY_MS: "25",
                 MCP_BB_ALLOWED_HOSTS: "",
                 MCP_BB_ALLOWED_ORIGINS: "",
                 MCP_BB_INTERNAL_API_KEY: "short",

@@ -2,15 +2,21 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import {
+    DEFAULT_RETRY_BASE_DELAY_MS,
+    DEFAULT_RETRY_MAX_ATTEMPTS,
     DEFAULT_MAX_SESSIONS,
     DEFAULT_PORT,
     DEFAULT_REQUEST_TIMEOUT_MS,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PATH,
     DEFAULT_SESSION_TTL_MS,
+    MAX_RETRY_BASE_DELAY_MS,
+    MAX_RETRY_MAX_ATTEMPTS,
     MAX_PORT,
     MAX_REQUEST_TIMEOUT_MS,
     MAX_RESPONSE_BYTES,
+    MIN_RETRY_BASE_DELAY_MS,
+    MIN_RETRY_MAX_ATTEMPTS,
     MIN_REQUEST_TIMEOUT_MS,
 } from "./runtime-policy.js";
 import { DEFAULT_ENABLED_WRITE_TOOLS, WRITE_TOOL_NAMES } from "./tool-policy.js";
@@ -217,6 +223,20 @@ export function getConfigFromEnv(env = process.env) {
         errors,
         label: "MCP_BB_REQUEST_TIMEOUT_MS",
     });
+    const retryMaxAttempts = readBoundedInt(env, "MCP_BB_RETRY_MAX_ATTEMPTS", {
+        fallback: DEFAULT_RETRY_MAX_ATTEMPTS,
+        min: MIN_RETRY_MAX_ATTEMPTS,
+        max: MAX_RETRY_MAX_ATTEMPTS,
+        errors,
+        label: "MCP_BB_RETRY_MAX_ATTEMPTS",
+    });
+    const retryBaseDelayMs = readBoundedInt(env, "MCP_BB_RETRY_BASE_DELAY_MS", {
+        fallback: DEFAULT_RETRY_BASE_DELAY_MS,
+        min: MIN_RETRY_BASE_DELAY_MS,
+        max: MAX_RETRY_BASE_DELAY_MS,
+        errors,
+        label: "MCP_BB_RETRY_BASE_DELAY_MS",
+    });
     const port = readPositiveInt(env, "MCP_BB_PORT", {
         fallback: DEFAULT_PORT,
         min: 1,
@@ -254,6 +274,10 @@ export function getConfigFromEnv(env = process.env) {
             apiBase: "https://api.bitbucket.org",
         },
         requestTimeoutMs,
+        retry: {
+            maxAttempts: retryMaxAttempts,
+            baseDelayMs: retryBaseDelayMs,
+        },
         maxResponseBytes: MAX_RESPONSE_BYTES,
         sessionTtlMs,
         maxSessions,
