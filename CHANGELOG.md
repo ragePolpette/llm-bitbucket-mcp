@@ -9,6 +9,9 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
 ### Added
 
+- Bounded retry/backoff for transient Bitbucket GET failures.
+- Lightweight `/metrics` runtime counters for local/internal troubleshooting.
+- Controlled sandbox integration tests for reliability behavior.
 - Minimal Docker packaging for local/internal distribution.
 - Tag-based GitHub release workflow with automated quality checks.
 - Explicit release process documentation for version bumps and changelog updates.
