@@ -229,6 +229,8 @@ Notes:
 Notes:
 
 - branch: `feature/advanced-reliability`
+- PR: `#17`
+- merged on: `2026-03-27`
 
 ## First Development Slice
 
