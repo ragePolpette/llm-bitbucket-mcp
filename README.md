@@ -39,7 +39,6 @@ Current exposed tools:
 - `add_pull_request_comment`
 - `create_pull_request`
 - `open_pull_request`
-- `bb_api`
 
 ## Scope And Non-Goals
 
@@ -89,7 +88,7 @@ Current guardrails:
 - `/health` returns a minimal runtime payload
 - transient Bitbucket read failures use bounded retry/backoff
 - `/metrics` exposes essential runtime counters for local/internal troubleshooting
-- `bb_api` is read-only and constrained to the configured repository scope
+- the generic `bb_api` escape hatch remains in code for internal use but is not exposed in the normal MCP tool catalog
 
 This is the intended posture:
 
@@ -215,18 +214,6 @@ Runtime secrets still stay outside the image and outside repo files.
     "tool": "get_pull_request_statuses",
     "arguments": {
         "pr_id": 42
-    }
-}
-```
-
-### Query a repo-scoped Bitbucket endpoint
-
-```json
-{
-    "tool": "bb_api",
-    "arguments": {
-        "method": "GET",
-        "path": "/repositories/studioboost/bpopilot/pipelines"
     }
 }
 ```
