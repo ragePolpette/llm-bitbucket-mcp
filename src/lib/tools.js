@@ -148,6 +148,40 @@ export const TOOLS = [
             required: ["pr_id"],
         },
     },
+    {
+        name: "get_pipeline_run",
+        description:
+            "Dettaglio sintetico di una pipeline Bitbucket: stato, risultato, branch/commit target, build number e link.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pipeline_ref: {
+                    type: "string",
+                    description:
+                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
+                },
+            },
+            required: ["pipeline_ref"],
+        },
+    },
+    {
+        name: "get_pipeline_failure_output",
+        description:
+            "Recupera gli step falliti di una pipeline e il relativo output log, troncato in modo sicuro se troppo lungo.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pipeline_ref: {
+                    type: "string",
+                    description:
+                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
+                },
+            },
+            required: ["pipeline_ref"],
+        },
+    },
 
     // ── PR write tools ───────────────────────────────────────────
     {
