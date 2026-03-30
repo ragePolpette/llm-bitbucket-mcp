@@ -294,39 +294,6 @@ export const TOOLS = [
             required: ["title", "source_branch"],
         },
     },
-
-    // ── Utility tools ────────────────────────────────────────────
-    {
-        name: "bb_api",
-        description:
-            "Chiamata generica read-only all'API Bitbucket REST 2.0. Supporta solo GET per endpoint non coperti dai tool semantici.",
-        annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                method: {
-                    type: "string",
-                    enum: ["GET"],
-                    description: "Metodo HTTP consentito. Solo GET.",
-                },
-                path: {
-                    type: "string",
-                    description:
-                        "API path read-only (es. '/repositories/studioboost/bpopilot/pipelines'). /2.0/ preposto automaticamente se mancante.",
-                },
-                body: {
-                    type: "object",
-                    description: "Non usato. Lasciare vuoto.",
-                },
-                queryParams: {
-                    type: "object",
-                    description: 'Query string params (es. {"state": "OPEN"}).',
-                    additionalProperties: { type: "string" },
-                },
-            },
-            required: ["method", "path"],
-        },
-    },
 ];
 
 /*
@@ -356,6 +323,37 @@ export const TOOLS = [
  *             message: { type: "string", description: "Messaggio commit merge. Opzionale." }
  *         },
  *         required: ["pr_id"]
+ *     }
+ * }
+ * {
+ *     name: "bb_api",
+ *     description:
+ *         "Chiamata generica read-only all'API Bitbucket REST 2.0. Supporta solo GET per endpoint non coperti dai tool semantici.",
+ *     annotations: { readOnlyHint: true },
+ *     inputSchema: {
+ *         type: "object",
+ *         properties: {
+ *             method: {
+ *                 type: "string",
+ *                 enum: ["GET"],
+ *                 description: "Metodo HTTP consentito. Solo GET.",
+ *             },
+ *             path: {
+ *                 type: "string",
+ *                 description:
+ *                     "API path read-only (es. '/repositories/studioboost/bpopilot/pipelines'). /2.0/ preposto automaticamente se mancante.",
+ *             },
+ *             body: {
+ *                 type: "object",
+ *                 description: "Non usato. Lasciare vuoto.",
+ *             },
+ *             queryParams: {
+ *                 type: "object",
+ *                 description: 'Query string params (es. {"state": "OPEN"}).',
+ *                 additionalProperties: { type: "string" },
+ *             },
+ *         },
+ *         required: ["method", "path"],
  *     }
  * }
  */

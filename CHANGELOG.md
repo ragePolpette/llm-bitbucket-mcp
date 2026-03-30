@@ -18,6 +18,10 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 - Tag-based GitHub release workflow with automated quality checks.
 - Explicit release process documentation for version bumps and changelog updates.
 
+### Changed
+
+- Hid the generic `bb_api` escape hatch from the exposed MCP catalog while keeping the internal handler in code.
+
 ## [1.0.0] - 2026-03-26
 
 ### Added

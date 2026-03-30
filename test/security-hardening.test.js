@@ -25,6 +25,7 @@ test("write tool allowlist can remove selected write tools from the exposed surf
     assert.equal(enabledToolNames.has("create_pull_request"), false);
     assert.equal(enabledToolNames.has("open_pull_request"), false);
     assert.equal(enabledToolNames.has("get_pull_request"), true);
+    assert.equal(enabledToolNames.has("bb_api"), false);
 });
 
 test("bitbucket_info exposes tool map and runtime branch semantics", async () => {
@@ -44,7 +45,7 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
     assert.ok(result.tool_map.discovery.includes("get_pipeline_run"));
     assert.ok(result.tool_map.discovery.includes("get_pipeline_failure_output"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
-    assert.deepEqual(result.tool_map.utility, ["bb_api"]);
+    assert.deepEqual(result.tool_map.utility, []);
     assert.equal(result.runtime_options.auth_enabled, false);
     assert.equal(result.runtime_options.default_destination_branch, "develop");
     assert.deepEqual(result.runtime_options.enabled_write_tools, []);
