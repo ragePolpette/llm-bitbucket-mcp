@@ -32,6 +32,8 @@ Current exposed tools:
 - `get_pull_request_commits`
 - `get_pull_request_statuses`
 - `get_pull_request_tasks`
+- `get_pull_request_pipelines`
+- `get_pull_request_pipeline_failure_output`
 - `get_pipeline_run`
 - `get_pipeline_failure_output`
 - `add_pull_request_comment`
@@ -239,6 +241,30 @@ Runtime secrets still stay outside the image and outside repo files.
     }
 }
 ```
+
+### Read pipelines for a PR source commit
+
+```json
+{
+    "tool": "get_pull_request_pipelines",
+    "arguments": {
+        "pr_id": 42
+    }
+}
+```
+
+### Read failed pipeline output starting from pr_id
+
+```json
+{
+    "tool": "get_pull_request_pipeline_failure_output",
+    "arguments": {
+        "pr_id": 42
+    }
+}
+```
+
+These PR pipeline tools first use Bitbucket PR statuses to recover the full source commit and linked pipeline runs, which is more reliable than guessing from the branch alone.
 
 ### Read failed pipeline output
 

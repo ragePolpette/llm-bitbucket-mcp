@@ -9,6 +9,7 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
 ### Added
 
+- Pull-request-to-pipeline correlation tools using PR statuses, commit correlation and failed-step logs.
 - Pipeline run inspection and failed-step log retrieval tools.
 - Bounded retry/backoff for transient Bitbucket GET failures.
 - Lightweight `/metrics` runtime counters for local/internal troubleshooting.
