@@ -15,6 +15,7 @@ It is not designed as a public multi-tenant SaaS service.
 The server exposes a focused Bitbucket MCP surface for:
 
 - pull request discovery and inspection
+- pipeline run inspection and failed-step log extraction
 - pull request commits, statuses and tasks
 - pull request comments
 - pull request creation
@@ -31,6 +32,8 @@ Current exposed tools:
 - `get_pull_request_commits`
 - `get_pull_request_statuses`
 - `get_pull_request_tasks`
+- `get_pipeline_run`
+- `get_pipeline_failure_output`
 - `add_pull_request_comment`
 - `create_pull_request`
 - `open_pull_request`
@@ -222,6 +225,28 @@ Runtime secrets still stay outside the image and outside repo files.
     "arguments": {
         "method": "GET",
         "path": "/repositories/studioboost/bpopilot/pipelines"
+    }
+}
+```
+
+### Read a pipeline outcome
+
+```json
+{
+    "tool": "get_pipeline_run",
+    "arguments": {
+        "pipeline_ref": "{11111111-2222-3333-4444-555555555555}"
+    }
+}
+```
+
+### Read failed pipeline output
+
+```json
+{
+    "tool": "get_pipeline_failure_output",
+    "arguments": {
+        "pipeline_ref": "https://bitbucket.org/studioboost/bpopilot/addon/pipelines/home#!/results/{11111111-2222-3333-4444-555555555555}"
     }
 }
 ```

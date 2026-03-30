@@ -39,6 +39,8 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
     assert.ok(result.tool_map.discovery.includes("get_pull_request_commits"));
     assert.ok(result.tool_map.discovery.includes("get_pull_request_statuses"));
     assert.ok(result.tool_map.discovery.includes("get_pull_request_tasks"));
+    assert.ok(result.tool_map.discovery.includes("get_pipeline_run"));
+    assert.ok(result.tool_map.discovery.includes("get_pipeline_failure_output"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
     assert.deepEqual(result.tool_map.utility, ["bb_api"]);
     assert.equal(result.runtime_options.auth_enabled, false);
@@ -449,6 +451,166 @@ test("get_pull_request_tasks returns task summaries", async () => {
             },
         ],
     });
+});
+
+test("get_pipeline_run returns pipeline summary fields", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path) {
+            calls.push({ method, path });
+            return {
+                uuid: "{11111111-2222-3333-4444-555555555555}",
+                build_number: 17,
+                state: {
+                    name: "COMPLETED",
+                    result: { name: "FAILED" },
+                },
+                target: {
+                    ref_name: "feature/test",
+                    commit: {
+                        hash: "abc123",
+                        message: "Break pipeline",
+                    },
+                },
+                creator: { display_name: "Alice" },
+                created_on: "2026-03-30T10:00:00Z",
+                completed_on: "2026-03-30T10:03:00Z",
+                duration_in_seconds: 180,
+                links: { html: { href: "https://bitbucket/pipelines/17" } },
+            };
+        },
+    };
+
+    const result = await handleToolCall(
+        "get_pipeline_run",
+        { pipeline_ref: "11111111-2222-3333-4444-555555555555" },
+        client,
+    );
+
+    assert.deepEqual(calls, [
+        {
+            method: "GET",
+            path: "/repositories/ws/repo/pipelines/{11111111-2222-3333-4444-555555555555}",
+        },
+    ]);
+    assert.deepEqual(result, {
+        pipeline: {
+            uuid: "{11111111-2222-3333-4444-555555555555}",
+            build_number: 17,
+            state: "COMPLETED",
+            result: "FAILED",
+            branch: "feature/test",
+            commit_hash: "abc123",
+            commit_message: "Break pipeline",
+            creator: "Alice",
+            created_on: "2026-03-30T10:00:00Z",
+            completed_on: "2026-03-30T10:03:00Z",
+            duration_in_seconds: 180,
+            link: "https://bitbucket/pipelines/17",
+        },
+    });
+});
+
+test("get_pipeline_failure_output returns failed steps and log output", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { accept, queryParams } = {}) {
+            calls.push({ method, path, accept, queryParams });
+            if (path.endsWith("pipelines/{11111111-2222-3333-4444-555555555555}")) {
+                return {
+                    uuid: "{11111111-2222-3333-4444-555555555555}",
+                    build_number: 18,
+                    state: {
+                        name: "COMPLETED",
+                        result: { name: "FAILED" },
+                    },
+                    target: { ref_name: "feature/failing" },
+                    links: { html: { href: "https://bitbucket/pipelines/18" } },
+                };
+            }
+            if (path.endsWith("pipelines/{11111111-2222-3333-4444-555555555555}/steps")) {
+                return {
+                    values: [
+                        {
+                            uuid: "{aaaaaaaa-2222-3333-4444-555555555555}",
+                            name: "Unit tests",
+                            state: {
+                                name: "COMPLETED",
+                                result: { name: "FAILED" },
+                            },
+                            started_on: "2026-03-30T10:00:00Z",
+                            completed_on: "2026-03-30T10:02:00Z",
+                            links: { html: { href: "https://bitbucket/steps/a" } },
+                        },
+                        {
+                            uuid: "{bbbbbbbb-2222-3333-4444-555555555555}",
+                            name: "Build",
+                            state: {
+                                name: "COMPLETED",
+                                result: { name: "SUCCESSFUL" },
+                            },
+                        },
+                    ],
+                };
+            }
+            if (
+                path.endsWith(
+                    "pipelines/{11111111-2222-3333-4444-555555555555}/steps/{aaaaaaaa-2222-3333-4444-555555555555}/log",
+                )
+            ) {
+                return "TypeError: pipeline exploded";
+            }
+            throw new Error(`Unexpected path ${path}`);
+        },
+    };
+
+    const result = await handleToolCall(
+        "get_pipeline_failure_output",
+        {
+            pipeline_ref:
+                "https://bitbucket.org/workspace/repo/addon/pipelines/home#!/results/{11111111-2222-3333-4444-555555555555}",
+        },
+        client,
+    );
+
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[1], {
+        method: "GET",
+        path: "/repositories/ws/repo/pipelines/{11111111-2222-3333-4444-555555555555}/steps",
+        accept: undefined,
+        queryParams: { pagelen: "100" },
+    });
+    assert.equal(calls[2].accept, "text/plain");
+    assert.equal(result.failure_count, 1);
+    assert.deepEqual(result.failures, [
+        {
+            step: {
+                uuid: "{aaaaaaaa-2222-3333-4444-555555555555}",
+                name: "Unit tests",
+                state: "COMPLETED",
+                result: "FAILED",
+                started_on: "2026-03-30T10:00:00Z",
+                completed_on: "2026-03-30T10:02:00Z",
+                duration_in_seconds: null,
+                link: "https://bitbucket/steps/a",
+            },
+            log: "TypeError: pipeline exploded",
+            truncated: false,
+        },
+    ]);
+});
+
+test("get_pipeline_run rejects invalid pipeline refs", async () => {
+    await assert.rejects(
+        () => handleToolCall("get_pipeline_run", { pipeline_ref: "not-a-pipeline" }, {}),
+        /pipeline_ref deve contenere un UUID Bitbucket valido/,
+    );
 });
 
 test("bb_api normalizes Bitbucket API paths", () => {
