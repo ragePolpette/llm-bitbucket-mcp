@@ -66,7 +66,7 @@ function handleBitbucketInfo(client, policy) {
                 "get_pipeline_failure_output",
             ],
             pr_write: ["create_pull_request", "open_pull_request", "add_pull_request_comment"],
-            utility: ["bb_api"],
+            utility: [],
         },
         usage_notes: {
             find_open_pull_request:
@@ -88,7 +88,6 @@ function handleBitbucketInfo(client, policy) {
                 "Accetta pipeline UUID o URL Bitbucket e restituisce lo stato sintetico della pipeline.",
             get_pipeline_failure_output:
                 "Legge gli step falliti di una pipeline e ne recupera il log testuale troncato in modo sicuro.",
-            bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
         },
         runtime_options: {
             auth_enabled: Boolean(policy.authEnabled),
@@ -100,6 +99,7 @@ function handleBitbucketInfo(client, policy) {
             "Gestisce solo operazioni Bitbucket remote sul repository configurato.",
             "Non espone clone, checkout_branch o create_commit del workspace locale.",
             "I tool write esposti possono essere limitati via configurazione runtime.",
+            "bb_api resta implementato per uso interno ma non e' esposto nel catalogo MCP pubblico.",
             "Per git locale usare l'harness o un MCP git dedicato.",
         ],
     };
