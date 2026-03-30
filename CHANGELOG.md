@@ -9,6 +9,7 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
 ### Added
 
+- Pipeline run inspection and failed-step log retrieval tools.
 - Bounded retry/backoff for transient Bitbucket GET failures.
 - Lightweight `/metrics` runtime counters for local/internal troubleshooting.
 - Controlled sandbox integration tests for reliability behavior.
