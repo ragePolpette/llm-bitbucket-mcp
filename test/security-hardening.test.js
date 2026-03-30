@@ -39,6 +39,8 @@ test("bitbucket_info exposes tool map and runtime branch semantics", async () =>
     assert.ok(result.tool_map.discovery.includes("get_pull_request_commits"));
     assert.ok(result.tool_map.discovery.includes("get_pull_request_statuses"));
     assert.ok(result.tool_map.discovery.includes("get_pull_request_tasks"));
+    assert.ok(result.tool_map.discovery.includes("get_pull_request_pipelines"));
+    assert.ok(result.tool_map.discovery.includes("get_pull_request_pipeline_failure_output"));
     assert.ok(result.tool_map.discovery.includes("get_pipeline_run"));
     assert.ok(result.tool_map.discovery.includes("get_pipeline_failure_output"));
     assert.ok(result.tool_map.pr_write.includes("open_pull_request"));
@@ -451,6 +453,326 @@ test("get_pull_request_tasks returns task summaries", async () => {
             },
         ],
     });
+});
+
+test("get_pull_request_pipelines correlates pipelines from PR statuses and full commit hash", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { queryParams } = {}) {
+            calls.push({ method, path, queryParams });
+            if (path === "/repositories/ws/repo/pullrequests/42") {
+                return {
+                    id: 42,
+                    title: "Feature PR",
+                    source: {
+                        branch: { name: "feature/test" },
+                        commit: { hash: "abc123" },
+                    },
+                    destination: { branch: { name: "main" } },
+                    links: { html: { href: "https://bitbucket/pr/42" } },
+                };
+            }
+            if (path === "/repositories/ws/repo/pullrequests/42/statuses") {
+                return {
+                    values: [
+                        {
+                            key: "default",
+                            state: "SUCCESSFUL",
+                            url: "https://bitbucket.org/ws/repo/pipelines/results/201",
+                            commit: {
+                                hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            },
+                        },
+                        {
+                            key: "prs:**:main",
+                            state: "FAILED",
+                            url: "https://bitbucket.org/ws/repo/pipelines/results/202",
+                            commit: {
+                                hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            },
+                        },
+                    ],
+                };
+            }
+            if (path === "/repositories/ws/repo/pipelines") {
+                return {
+                    values: [
+                        {
+                            uuid: "{11111111-2222-3333-4444-555555555555}",
+                            build_number: 201,
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                            target: {
+                                pullrequest: { id: 42 },
+                                ref_name: "feature/test",
+                                commit: {
+                                    hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                    message: "feature push",
+                                },
+                            },
+                            links: {
+                                html: {
+                                    href: "https://bitbucket.org/ws/repo/pipelines/results/201",
+                                },
+                            },
+                        },
+                        {
+                            uuid: "{66666666-2222-3333-4444-555555555555}",
+                            build_number: 202,
+                            state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } },
+                            target: {
+                                pullrequest: { id: 42 },
+                                ref_name: "feature/test",
+                                commit: {
+                                    hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                    message: "feature push",
+                                },
+                            },
+                            links: {
+                                html: {
+                                    href: "https://bitbucket.org/ws/repo/pipelines/results/202",
+                                },
+                            },
+                        },
+                    ],
+                };
+            }
+            throw new Error(`Unexpected path ${path}`);
+        },
+    };
+
+    const result = await handleToolCall("get_pull_request_pipelines", { pr_id: 42 }, client);
+
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[2], {
+        method: "GET",
+        path: "/repositories/ws/repo/pipelines",
+        queryParams: {
+            sort: "-created_on",
+            pagelen: "20",
+            "target.commit.hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+    });
+    assert.equal(result.match_mode, "pr_status_commit");
+    assert.equal(result.pipeline_count, 2);
+    assert.equal(
+        result.pull_request.source_commit_hash,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    assert.equal(result.pull_request.source_commit_hash_source, "pr_statuses");
+    assert.deepEqual(
+        result.pipelines.map((pipeline) => pipeline.build_number),
+        [201, 202],
+    );
+});
+
+test("get_pull_request_pipelines falls back to source branch when commit correlation is empty", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { queryParams } = {}) {
+            calls.push({ method, path, queryParams });
+            if (path === "/repositories/ws/repo/pullrequests/42") {
+                return {
+                    id: 42,
+                    title: "Feature PR",
+                    source: {
+                        branch: { name: "feature/test" },
+                        commit: { hash: "abc123" },
+                    },
+                };
+            }
+            if (path === "/repositories/ws/repo/pullrequests/42/statuses") {
+                return {
+                    values: [
+                        {
+                            key: "prs:**:main",
+                            state: "FAILED",
+                            url: "https://bitbucket.org/ws/repo/pipelines/results/777",
+                            commit: {
+                                hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                            },
+                        },
+                    ],
+                };
+            }
+            if (
+                path === "/repositories/ws/repo/pipelines" &&
+                queryParams["target.commit.hash"] === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ) {
+                return { values: [] };
+            }
+            if (path === "/repositories/ws/repo/pipelines") {
+                return {
+                    values: [
+                        {
+                            uuid: "{77777777-2222-3333-4444-555555555555}",
+                            build_number: 301,
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                            target: {
+                                ref_name: "feature/test",
+                                commit: { hash: "older", message: "older push" },
+                            },
+                        },
+                    ],
+                };
+            }
+            throw new Error(`Unexpected path ${path}`);
+        },
+    };
+
+    const result = await handleToolCall("get_pull_request_pipelines", { pr_id: 42 }, client);
+
+    assert.equal(calls.length, 4);
+    assert.equal(result.match_mode, "source_branch_fallback");
+    assert.equal(result.pipeline_count, 1);
+    assert.equal(result.pipelines[0].build_number, 301);
+});
+
+test("get_pull_request_pipeline_failure_output aggregates failures across related pipelines", async () => {
+    const calls = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { accept, queryParams } = {}) {
+            calls.push({ method, path, accept, queryParams });
+            if (path === "/repositories/ws/repo/pullrequests/42") {
+                return {
+                    id: 42,
+                    title: "Feature PR",
+                    source: {
+                        branch: { name: "feature/test" },
+                        commit: { hash: "abc123" },
+                    },
+                    destination: { branch: { name: "main" } },
+                };
+            }
+            if (path === "/repositories/ws/repo/pullrequests/42/statuses") {
+                return {
+                    values: [
+                        {
+                            key: "default",
+                            state: "FAILED",
+                            url: "https://bitbucket.org/ws/repo/pipelines/results/401",
+                            commit: {
+                                hash: "cccccccccccccccccccccccccccccccccccccccc",
+                            },
+                        },
+                        {
+                            key: "prs:**:main",
+                            state: "FAILED",
+                            url: "https://bitbucket.org/ws/repo/pipelines/results/402",
+                            commit: {
+                                hash: "cccccccccccccccccccccccccccccccccccccccc",
+                            },
+                        },
+                    ],
+                };
+            }
+            if (path === "/repositories/ws/repo/pipelines") {
+                return {
+                    values: [
+                        {
+                            uuid: "{11111111-2222-3333-4444-555555555555}",
+                            build_number: 401,
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                            target: {
+                                pullrequest: { id: 42 },
+                                ref_name: "feature/test",
+                                commit: {
+                                    hash: "cccccccccccccccccccccccccccccccccccccccc",
+                                    message: "frontend push",
+                                },
+                            },
+                            links: {
+                                html: {
+                                    href: "https://bitbucket.org/ws/repo/pipelines/results/401",
+                                },
+                            },
+                        },
+                        {
+                            uuid: "{22222222-2222-3333-4444-555555555555}",
+                            build_number: 402,
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                            target: {
+                                pullrequest: { id: 42 },
+                                ref_name: "feature/test",
+                                commit: {
+                                    hash: "cccccccccccccccccccccccccccccccccccccccc",
+                                    message: "backend push",
+                                },
+                            },
+                            links: {
+                                html: {
+                                    href: "https://bitbucket.org/ws/repo/pipelines/results/402",
+                                },
+                            },
+                        },
+                    ],
+                };
+            }
+            if (path.endsWith("/pipelines/{11111111-2222-3333-4444-555555555555}/steps")) {
+                return {
+                    values: [
+                        {
+                            uuid: "{aaaaaaaa-2222-3333-4444-555555555555}",
+                            name: "Frontend tests",
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                        },
+                    ],
+                };
+            }
+            if (path.endsWith("/pipelines/{22222222-2222-3333-4444-555555555555}/steps")) {
+                return {
+                    values: [
+                        {
+                            uuid: "{bbbbbbbb-2222-3333-4444-555555555555}",
+                            name: "Backend tests",
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                        },
+                    ],
+                };
+            }
+            if (
+                path.endsWith(
+                    "/pipelines/{11111111-2222-3333-4444-555555555555}/steps/{aaaaaaaa-2222-3333-4444-555555555555}/log",
+                )
+            ) {
+                return "frontend exploded";
+            }
+            if (
+                path.endsWith(
+                    "/pipelines/{22222222-2222-3333-4444-555555555555}/steps/{bbbbbbbb-2222-3333-4444-555555555555}/log",
+                )
+            ) {
+                return "backend exploded";
+            }
+            throw new Error(`Unexpected path ${path}`);
+        },
+    };
+
+    const result = await handleToolCall(
+        "get_pull_request_pipeline_failure_output",
+        { pr_id: 42 },
+        client,
+    );
+
+    assert.equal(result.match_mode, "pr_status_commit");
+    assert.equal(result.pipeline_count, 2);
+    assert.equal(result.failure_count, 2);
+    assert.deepEqual(
+        result.failures.map((failure) => failure.pipeline.build_number),
+        [401, 402],
+    );
+    assert.deepEqual(
+        result.failures.map((failure) => failure.failures[0].log),
+        ["frontend exploded", "backend exploded"],
+    );
 });
 
 test("get_pipeline_run returns pipeline summary fields", async () => {
