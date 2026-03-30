@@ -24,6 +24,10 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleGetPRStatuses(args, client);
         case "get_pull_request_tasks":
             return handleGetPRTasks(args, client);
+        case "get_pipeline_run":
+            return handleGetPipelineRun(args, client);
+        case "get_pipeline_failure_output":
+            return handleGetPipelineFailureOutput(args, client);
         case "add_pull_request_comment":
             return handleAddPRComment(args, client);
         case "create_pull_request":
@@ -52,6 +56,8 @@ function handleBitbucketInfo(client, policy) {
                 "get_pull_request_commits",
                 "get_pull_request_statuses",
                 "get_pull_request_tasks",
+                "get_pipeline_run",
+                "get_pipeline_failure_output",
             ],
             pr_write: ["create_pull_request", "open_pull_request", "add_pull_request_comment"],
             utility: ["bb_api"],
@@ -68,6 +74,10 @@ function handleBitbucketInfo(client, policy) {
                 "Restituisce gli status Bitbucket associati alla PR, utile per build e check summary.",
             get_pull_request_tasks:
                 "Restituisce i task della PR con stato e contenuto raw, utile per follow-up review.",
+            get_pipeline_run:
+                "Accetta pipeline UUID o URL Bitbucket e restituisce lo stato sintetico della pipeline.",
+            get_pipeline_failure_output:
+                "Legge gli step falliti di una pipeline e ne recupera il log testuale troncato in modo sicuro.",
             bb_api: "Solo GET read-only, limitato agli endpoint del repository configurato.",
         },
         runtime_options: {
@@ -243,6 +253,80 @@ async function handleGetPRTasks(args, client) {
     });
 
     return { count: items.length, truncated, tasks: items };
+}
+
+// ── Pipeline read handlers ──────────────────────────────────────
+
+async function handleGetPipelineRun(args, client) {
+    const pipelineUuid = requirePipelineUuid(args.pipeline_ref);
+
+    logger.logApiCall("GET", `pipelines/${pipelineUuid}`, "get_pipeline_run", "in", {});
+    const pipeline = await client.request("GET", client.repoPath(`pipelines/${pipelineUuid}`));
+    logger.logApiCall("GET", `pipelines/${pipelineUuid}`, "get_pipeline_run", "out", {
+        success: true,
+    });
+
+    return { pipeline: mapPipelineSummary(pipeline) };
+}
+
+async function handleGetPipelineFailureOutput(args, client) {
+    const pipelineUuid = requirePipelineUuid(args.pipeline_ref);
+
+    logger.logApiCall(
+        "GET",
+        `pipelines/${pipelineUuid}/steps`,
+        "get_pipeline_failure_output",
+        "in",
+        {},
+    );
+
+    const pipeline = await client.request("GET", client.repoPath(`pipelines/${pipelineUuid}`));
+    const { items: steps } = await collectPaginatedValues(
+        client,
+        client.repoPath(`pipelines/${pipelineUuid}/steps`),
+        (step) => step,
+    );
+
+    const failedSteps = steps
+        .filter(isFailedPipelineStep)
+        .slice(0, TOOL_LIMITS.pipelineFailedStepsCap);
+    const failures = [];
+
+    for (const step of failedSteps) {
+        const stepUuid = normalizeBitbucketUuid(step.uuid, "step uuid");
+        const logText = await client.request(
+            "GET",
+            client.repoPath(`pipelines/${pipelineUuid}/steps/${stepUuid}/log`),
+            { accept: "text/plain" },
+        );
+        const normalizedLog =
+            typeof logText === "string" ? logText : JSON.stringify(logText, null, 2);
+        const { text, truncated } = truncateText(normalizedLog, TOOL_LIMITS.pipelineLogBytes);
+
+        failures.push({
+            step: mapPipelineStep(step),
+            log: text,
+            truncated,
+        });
+    }
+
+    logger.logApiCall(
+        "GET",
+        `pipelines/${pipelineUuid}/steps`,
+        "get_pipeline_failure_output",
+        "out",
+        {
+            success: true,
+            result_count: failures.length,
+            has_results: failures.length > 0,
+        },
+    );
+
+    return {
+        pipeline: mapPipelineSummary(pipeline),
+        failure_count: failures.length,
+        failures,
+    };
 }
 
 // ── PR write handlers ────────────────────────────────────────────
@@ -526,6 +610,13 @@ function requirePositiveIntegerParam(args, name) {
     return validateInteger(args[name], name, { min: 1 });
 }
 
+function requirePipelineUuid(value) {
+    if (value === undefined || value === null || value === "") {
+        throw new Error("Parametro obbligatorio mancante: pipeline_ref");
+    }
+    return normalizeBitbucketUuid(value, "pipeline_ref");
+}
+
 function validateOptionalString(value, name, options = {}) {
     if (value === undefined || value === null || value === "") return null;
     return validateString(value, name, options);
@@ -629,6 +720,28 @@ function validateQueryParams(queryParams) {
     }
 }
 
+function normalizeBitbucketUuid(rawValue, label) {
+    const normalized = validateString(rawValue, label, {
+        maxLength: TOOL_LIMITS.pipelineRefLength,
+    });
+    const match = normalized.match(/\{?[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}?/);
+    if (!match) {
+        throw new Error(`${label} deve contenere un UUID Bitbucket valido.`);
+    }
+    const uuid = match[0].replace(/[{}]/g, "").toLowerCase();
+    return `{${uuid}}`;
+}
+
+function truncateText(value, maxLength) {
+    if (value.length <= maxLength) {
+        return { text: value, truncated: false };
+    }
+    return {
+        text: value.slice(0, maxLength),
+        truncated: true,
+    };
+}
+
 function mapPrSummary(pr) {
     return {
         id: pr.id,
@@ -691,4 +804,46 @@ function mapPrTask(task) {
         updated_on: task.updated_on || null,
         comment_id: task.comment?.id || null,
     };
+}
+
+function mapPipelineSummary(pipeline) {
+    return {
+        uuid: pipeline.uuid || null,
+        build_number: pipeline.build_number || null,
+        state: pipeline.state?.name || null,
+        result: pipeline.state?.result?.name || null,
+        branch: pipeline.target?.ref_name || pipeline.target?.ref?.name || null,
+        commit_hash: pipeline.target?.commit?.hash || null,
+        commit_message:
+            pipeline.target?.commit?.message || pipeline.target?.commit?.summary?.raw || null,
+        creator: pipeline.creator?.display_name || pipeline.created_by?.display_name || null,
+        created_on: pipeline.created_on || null,
+        completed_on: pipeline.completed_on || null,
+        duration_in_seconds: pipeline.duration_in_seconds || null,
+        link: pipeline.links?.html?.href || null,
+    };
+}
+
+function mapPipelineStep(step) {
+    return {
+        uuid: step.uuid || null,
+        name: step.name || step.step?.name || step.setup_commands?.[0] || null,
+        state: step.state?.name || null,
+        result: step.state?.result?.name || null,
+        started_on: step.started_on || null,
+        completed_on: step.completed_on || null,
+        duration_in_seconds: step.duration_in_seconds || null,
+        link: step.links?.html?.href || null,
+    };
+}
+
+function isFailedPipelineStep(step) {
+    const state = String(step.state?.name || "")
+        .trim()
+        .toUpperCase();
+    const result = String(step.state?.result?.name || "")
+        .trim()
+        .toUpperCase();
+
+    return result === "FAILED" || result === "ERROR" || state === "FAILED" || state === "ERROR";
 }
