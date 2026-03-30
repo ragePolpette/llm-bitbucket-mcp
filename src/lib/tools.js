@@ -149,6 +149,32 @@ export const TOOLS = [
         },
     },
     {
+        name: "get_pull_request_pipelines",
+        description:
+            "Risalendo da pr_id correla le pipeline della PR tramite status Bitbucket e commit sorgente, con fallback sulla branch sorgente.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
+        name: "get_pull_request_pipeline_failure_output",
+        description:
+            "Partendo da pr_id trova le pipeline correlate alla PR tramite status/build Bitbucket e restituisce i log degli step falliti.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
         name: "get_pipeline_run",
         description:
             "Dettaglio sintetico di una pipeline Bitbucket: stato, risultato, branch/commit target, build number e link.",

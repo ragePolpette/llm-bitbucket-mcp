@@ -12,6 +12,7 @@ export const TOOL_LIMITS = {
     descriptionLength: 10000,
     commentLength: 10000,
     filePathLength: 500,
+    pullRequestPipelinesCap: 20,
     pipelineRefLength: 500,
     bitbucketPageLength: 100,
     paginatedCollectionCap: 500,

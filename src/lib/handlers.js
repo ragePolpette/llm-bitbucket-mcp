@@ -24,6 +24,10 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleGetPRStatuses(args, client);
         case "get_pull_request_tasks":
             return handleGetPRTasks(args, client);
+        case "get_pull_request_pipelines":
+            return handleGetPullRequestPipelines(args, client);
+        case "get_pull_request_pipeline_failure_output":
+            return handleGetPullRequestPipelineFailureOutput(args, client);
         case "get_pipeline_run":
             return handleGetPipelineRun(args, client);
         case "get_pipeline_failure_output":
@@ -56,6 +60,8 @@ function handleBitbucketInfo(client, policy) {
                 "get_pull_request_commits",
                 "get_pull_request_statuses",
                 "get_pull_request_tasks",
+                "get_pull_request_pipelines",
+                "get_pull_request_pipeline_failure_output",
                 "get_pipeline_run",
                 "get_pipeline_failure_output",
             ],
@@ -74,6 +80,10 @@ function handleBitbucketInfo(client, policy) {
                 "Restituisce gli status Bitbucket associati alla PR, utile per build e check summary.",
             get_pull_request_tasks:
                 "Restituisce i task della PR con stato e contenuto raw, utile per follow-up review.",
+            get_pull_request_pipelines:
+                "Risalendo da pr_id usa prima gli status della PR per correlare i build pipeline reali; se non basta, fa fallback sul commit o sulla branch sorgente.",
+            get_pull_request_pipeline_failure_output:
+                "Per una PR recupera i run falliti correlati tramite status/build Bitbucket e ne aggrega i log degli step in errore.",
             get_pipeline_run:
                 "Accetta pipeline UUID o URL Bitbucket e restituisce lo stato sintetico della pipeline.",
             get_pipeline_failure_output:
@@ -255,6 +265,73 @@ async function handleGetPRTasks(args, client) {
     return { count: items.length, truncated, tasks: items };
 }
 
+async function handleGetPullRequestPipelines(args, client) {
+    requirePositiveIntegerParam(args, "pr_id");
+
+    logger.logApiCall(
+        "GET",
+        `pullrequests/${args.pr_id}/pipelines`,
+        "get_pull_request_pipelines",
+        "in",
+        {},
+    );
+    const related = await fetchPullRequestPipelines(args.pr_id, client);
+    logger.logApiCall(
+        "GET",
+        `pullrequests/${args.pr_id}/pipelines`,
+        "get_pull_request_pipelines",
+        "out",
+        {
+            success: true,
+            result_count: related.pipelines.length,
+            has_results: related.pipelines.length > 0,
+        },
+    );
+
+    return related;
+}
+
+async function handleGetPullRequestPipelineFailureOutput(args, client) {
+    requirePositiveIntegerParam(args, "pr_id");
+
+    logger.logApiCall(
+        "GET",
+        `pullrequests/${args.pr_id}/pipeline_failures`,
+        "get_pull_request_pipeline_failure_output",
+        "in",
+        {},
+    );
+
+    const related = await fetchPullRequestPipelines(args.pr_id, client);
+    const failedPipelines = related._rawPipelines.filter(isFailedPipelineRun);
+    const failures = [];
+
+    for (const pipeline of failedPipelines) {
+        const failure = await buildPipelineFailureOutput(pipeline, client);
+        failures.push(failure);
+    }
+
+    logger.logApiCall(
+        "GET",
+        `pullrequests/${args.pr_id}/pipeline_failures`,
+        "get_pull_request_pipeline_failure_output",
+        "out",
+        {
+            success: true,
+            result_count: failures.length,
+            has_results: failures.length > 0,
+        },
+    );
+
+    return {
+        pull_request: related.pull_request,
+        match_mode: related.match_mode,
+        pipeline_count: related.pipeline_count,
+        failure_count: failures.length,
+        failures,
+    };
+}
+
 // ── Pipeline read handlers ──────────────────────────────────────
 
 async function handleGetPipelineRun(args, client) {
@@ -281,34 +358,7 @@ async function handleGetPipelineFailureOutput(args, client) {
     );
 
     const pipeline = await client.request("GET", client.repoPath(`pipelines/${pipelineUuid}`));
-    const { items: steps } = await collectPaginatedValues(
-        client,
-        client.repoPath(`pipelines/${pipelineUuid}/steps`),
-        (step) => step,
-    );
-
-    const failedSteps = steps
-        .filter(isFailedPipelineStep)
-        .slice(0, TOOL_LIMITS.pipelineFailedStepsCap);
-    const failures = [];
-
-    for (const step of failedSteps) {
-        const stepUuid = normalizeBitbucketUuid(step.uuid, "step uuid");
-        const logText = await client.request(
-            "GET",
-            client.repoPath(`pipelines/${pipelineUuid}/steps/${stepUuid}/log`),
-            { accept: "text/plain" },
-        );
-        const normalizedLog =
-            typeof logText === "string" ? logText : JSON.stringify(logText, null, 2);
-        const { text, truncated } = truncateText(normalizedLog, TOOL_LIMITS.pipelineLogBytes);
-
-        failures.push({
-            step: mapPipelineStep(step),
-            log: text,
-            truncated,
-        });
-    }
+    const failures = await readFailedStepLogs(pipelineUuid, client);
 
     logger.logApiCall(
         "GET",
@@ -534,6 +584,254 @@ async function collectPullRequestCollection(prId, suffix, client, { tool, mapVal
     });
 
     return { items, truncated };
+}
+
+async function fetchPullRequestPipelines(prId, client) {
+    const pr = await client.request("GET", client.repoPath(`pullrequests/${prId}`));
+    const sourceBranch = pr.source?.branch?.name || null;
+    const sourceCommitHash = pr.source?.commit?.hash || null;
+    const statuses = await fetchPullRequestStatusRecords(prId, client);
+    const statusContext = buildPullRequestStatusContext(statuses);
+
+    if (!sourceBranch) {
+        throw new Error("Impossibile determinare source_branch dalla pull request.");
+    }
+
+    const preferredCommitHash =
+        statusContext.commitHash || normalizeFullCommitHash(sourceCommitHash);
+    const commitHashSource = statusContext.commitHash
+        ? "pr_statuses"
+        : preferredCommitHash
+          ? "pull_request"
+          : null;
+
+    let matchMode = preferredCommitHash ? "pr_status_commit" : "source_branch_fallback";
+    let pipelines = [];
+    let truncated = false;
+
+    if (preferredCommitHash) {
+        const commitMatch = await listPipelinesForCommitHash(client, preferredCommitHash);
+        pipelines = filterPipelinesForPullRequestContext(commitMatch.items, {
+            prId,
+            sourceBranch,
+            commitHash: preferredCommitHash,
+            statusBuildNumbers: statusContext.buildNumbers,
+            statusUrls: statusContext.urls,
+        });
+        truncated = commitMatch.truncated;
+
+        if (
+            !pipelines.length &&
+            !statusContext.commitHash &&
+            sourceCommitHash &&
+            preferredCommitHash !== sourceCommitHash
+        ) {
+            matchMode = "source_commit";
+        }
+    }
+
+    if (!pipelines.length) {
+        const branchFallback = await listPipelinesForPullRequestTarget(client, {
+            sourceBranch,
+            sourceCommitHash: null,
+        });
+        matchMode = preferredCommitHash ? "source_branch_fallback" : "source_branch_only";
+        pipelines = branchFallback.items;
+        truncated = branchFallback.truncated;
+    }
+
+    return {
+        pull_request: {
+            id: pr.id,
+            title: pr.title,
+            source_branch: sourceBranch,
+            destination_branch: pr.destination?.branch?.name || null,
+            source_commit_hash: preferredCommitHash || sourceCommitHash || null,
+            source_commit_hash_source: commitHashSource,
+            link: pr.links?.html?.href || null,
+        },
+        match_mode: matchMode,
+        pipeline_count: pipelines.length,
+        truncated,
+        pipelines: pipelines.map(mapPipelineSummary),
+        _rawPipelines: pipelines,
+    };
+}
+
+async function fetchPullRequestStatusRecords(prId, client) {
+    const { items } = await collectPaginatedValues(
+        client,
+        client.repoPath(`pullrequests/${prId}/statuses`),
+        (status) => status,
+    );
+    return items;
+}
+
+function buildPullRequestStatusContext(statuses) {
+    const buildNumbers = new Set();
+    const urls = new Set();
+    let commitHash = null;
+
+    for (const status of statuses) {
+        const normalizedCommitHash = normalizeFullCommitHash(status.commit?.hash);
+        if (!commitHash && normalizedCommitHash) {
+            commitHash = normalizedCommitHash;
+        }
+
+        const normalizedUrl = normalizePipelineResultUrl(status.url);
+        if (normalizedUrl) {
+            urls.add(normalizedUrl);
+        }
+
+        const buildNumber = parsePipelineBuildNumber(status.url);
+        if (buildNumber !== null) {
+            buildNumbers.add(buildNumber);
+        }
+    }
+
+    return { commitHash, buildNumbers, urls };
+}
+
+function normalizeFullCommitHash(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const trimmed = value.trim().toLowerCase();
+    return /^[0-9a-f]{40}$/.test(trimmed) ? trimmed : null;
+}
+
+function parsePipelineBuildNumber(url) {
+    if (typeof url !== "string") {
+        return null;
+    }
+    const match = url.match(/\/pipelines\/results\/(\d+)(?:[/?#]|$)/i);
+    return match ? Number(match[1]) : null;
+}
+
+function normalizePipelineResultUrl(url) {
+    if (typeof url !== "string") {
+        return null;
+    }
+    return url.trim().replace(/\/+$/, "");
+}
+
+function filterPipelinesForPullRequestContext(
+    pipelines,
+    { prId, sourceBranch, commitHash, statusBuildNumbers, statusUrls },
+) {
+    if (!Array.isArray(pipelines) || pipelines.length === 0) {
+        return [];
+    }
+
+    const statusMatched = pipelines.filter((pipeline) => {
+        const htmlUrl = normalizePipelineResultUrl(pipeline.links?.html?.href);
+        const buildNumber = Number.isInteger(pipeline.build_number) ? pipeline.build_number : null;
+        return (
+            (buildNumber !== null && statusBuildNumbers.has(buildNumber)) ||
+            (htmlUrl && statusUrls.has(htmlUrl))
+        );
+    });
+    if (statusMatched.length > 0) {
+        return statusMatched;
+    }
+
+    const prMatched = pipelines.filter((pipeline) => {
+        const pipelinePrId = pipeline.target?.pullrequest?.id;
+        return pipelinePrId === prId;
+    });
+    if (prMatched.length > 0) {
+        return prMatched;
+    }
+
+    return pipelines.filter((pipeline) => {
+        const pipelineCommitHash = normalizeFullCommitHash(pipeline.target?.commit?.hash);
+        const pipelineBranch = pipeline.target?.ref_name || pipeline.target?.ref?.name || null;
+        return (
+            pipelineCommitHash === commitHash &&
+            (!sourceBranch || pipelineBranch === sourceBranch || !pipelineBranch)
+        );
+    });
+}
+
+async function listPipelinesForCommitHash(client, commitHash) {
+    const result = await client.request("GET", client.repoPath("pipelines"), {
+        queryParams: {
+            sort: "-created_on",
+            pagelen: String(TOOL_LIMITS.pullRequestPipelinesCap),
+            "target.commit.hash": commitHash,
+        },
+    });
+
+    return {
+        items: result.values || [],
+        truncated: Boolean(result.next),
+    };
+}
+
+async function listPipelinesForPullRequestTarget(client, { sourceBranch, sourceCommitHash }) {
+    const queryParams = {
+        sort: "-created_on",
+        pagelen: String(TOOL_LIMITS.pullRequestPipelinesCap),
+        "target.ref_type": "branch",
+        "target.ref_name": sourceBranch,
+    };
+
+    if (sourceCommitHash) {
+        queryParams["target.commit.hash"] = sourceCommitHash;
+    }
+
+    const result = await client.request("GET", client.repoPath("pipelines"), {
+        queryParams,
+    });
+
+    return {
+        items: result.values || [],
+        truncated: Boolean(result.next),
+    };
+}
+
+async function buildPipelineFailureOutput(pipeline, client) {
+    const pipelineUuid = normalizeBitbucketUuid(pipeline.uuid, "pipeline uuid");
+    const failures = await readFailedStepLogs(pipelineUuid, client);
+
+    return {
+        pipeline: mapPipelineSummary(pipeline),
+        failure_count: failures.length,
+        failures,
+    };
+}
+
+async function readFailedStepLogs(pipelineUuid, client) {
+    const { items: steps } = await collectPaginatedValues(
+        client,
+        client.repoPath(`pipelines/${pipelineUuid}/steps`),
+        (step) => step,
+    );
+
+    const failedSteps = steps
+        .filter(isFailedPipelineStep)
+        .slice(0, TOOL_LIMITS.pipelineFailedStepsCap);
+    const failures = [];
+
+    for (const step of failedSteps) {
+        const stepUuid = normalizeBitbucketUuid(step.uuid, "step uuid");
+        const logText = await client.request(
+            "GET",
+            client.repoPath(`pipelines/${pipelineUuid}/steps/${stepUuid}/log`),
+            { accept: "text/plain" },
+        );
+        const normalizedLog =
+            typeof logText === "string" ? logText : JSON.stringify(logText, null, 2);
+        const { text, truncated } = truncateText(normalizedLog, TOOL_LIMITS.pipelineLogBytes);
+
+        failures.push({
+            step: mapPipelineStep(step),
+            log: text,
+            truncated,
+        });
+    }
+
+    return failures;
 }
 
 async function collectPaginatedValues(client, initialPath, mapValue) {
@@ -842,6 +1140,17 @@ function isFailedPipelineStep(step) {
         .trim()
         .toUpperCase();
     const result = String(step.state?.result?.name || "")
+        .trim()
+        .toUpperCase();
+
+    return result === "FAILED" || result === "ERROR" || state === "FAILED" || state === "ERROR";
+}
+
+function isFailedPipelineRun(pipeline) {
+    const state = String(pipeline.state?.name || "")
+        .trim()
+        .toUpperCase();
+    const result = String(pipeline.state?.result?.name || "")
         .trim()
         .toUpperCase();
 
