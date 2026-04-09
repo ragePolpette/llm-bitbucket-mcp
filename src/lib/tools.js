@@ -341,7 +341,7 @@ export const TOOLS = [
  *             path: {
  *                 type: "string",
  *                 description:
- *                     "API path read-only (es. '/repositories/studioboost/bpopilot/pipelines'). /2.0/ preposto automaticamente se mancante.",
+ *                     "API path read-only (es. '/repositories/workspace-slug/repo-slug/pipelines'). /2.0/ preposto automaticamente se mancante.",
  *             },
  *             body: {
  *                 type: "object",
