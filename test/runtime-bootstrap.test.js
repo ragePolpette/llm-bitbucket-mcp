@@ -13,8 +13,8 @@ function createTestConfig() {
     return {
         bitbucket: {
             apiBase: "https://api.bitbucket.org",
-            workspace: "studioboost",
-            repoSlug: "bpopilot",
+            workspace: "workspace-slug",
+            repoSlug: "repo-slug",
             userEmail: "dev@example.com",
             apiToken: "runtime-token",
             defaultDestinationBranch: "main",
@@ -58,8 +58,8 @@ test("createBitbucketClientFromConfig maps runtime Bitbucket settings", () => {
 
     assert.equal(client.defaultDestinationBranch, "main");
     assert.deepEqual(client.repoScope, {
-        workspace: "studioboost",
-        repoSlug: "bpopilot",
+        workspace: "workspace-slug",
+        repoSlug: "repo-slug",
     });
 });
 

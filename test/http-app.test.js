@@ -13,8 +13,8 @@ import {
 function createTestConfig() {
     return {
         bitbucket: {
-            workspace: "studioboost",
-            repoSlug: "bpopilot",
+            workspace: "workspace-slug",
+            repoSlug: "repo-slug",
         },
         server: {
             host: "127.0.0.1",

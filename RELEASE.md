@@ -10,7 +10,7 @@ This repo uses semantic versioning with tags in the form `vX.Y.Z`.
 
 ## Pre-release Checklist
 
-1. Update [CHANGELOG.md](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/CHANGELOG.md):
+1. Update [CHANGELOG.md](CHANGELOG.md):
    move relevant entries from `Unreleased` into the new version section.
 2. Run the full quality gate:
 
@@ -21,7 +21,7 @@ docker build --build-arg APP_VERSION=<next-version> -t llm-bitbucket-mcp:<next-v
 
 3. Ensure runtime secrets are not in repo files:
    `BITBUCKET_API_TOKEN` and `MCP_BB_INTERNAL_API_KEY` must be injected only at runtime
-   via the PowerShell launcher or the local dashboard in [mcp-dashboard](/C:/Users/Gianmarco/Urgewalt/Yetzirah/mcp-dashboard).
+   via the PowerShell launcher or the local dashboard in [mcp-dashboard](../mcp-dashboard).
 
 ## Version Bump
 
@@ -51,5 +51,6 @@ git push origin --tags
 
 ## Post-release
 
-- Add new upcoming changes back under `Unreleased` in [CHANGELOG.md](/C:/Users/Gianmarco/Urgewalt/Yetzirah/llm-bitbucket-mcp/CHANGELOG.md).
+- Add new upcoming changes back under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
 - Keep release PRs small and prefer one release tag per merged milestone slice.
+
