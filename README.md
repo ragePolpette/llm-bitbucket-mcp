@@ -87,8 +87,8 @@ The project aims to be safe by default for local use without pretending to solve
 
 - Node.js 22+
 - Bitbucket Cloud credentials provided at runtime:
-  - `BITBUCKET_USER_EMAIL`
-  - `BITBUCKET_API_TOKEN`
+    - `BITBUCKET_USER_EMAIL`
+    - `BITBUCKET_API_TOKEN`
 
 ## Setup
 
@@ -137,11 +137,11 @@ Find an open pull request:
 
 ```json
 {
-  "tool": "find_open_pull_request",
-  "arguments": {
-    "source_branch": "feature/my-change",
-    "destination_branch": "main"
-  }
+    "tool": "find_open_pull_request",
+    "arguments": {
+        "source_branch": "feature/my-change",
+        "destination_branch": "main"
+    }
 }
 ```
 
@@ -149,13 +149,13 @@ Create a pull request:
 
 ```json
 {
-  "tool": "create_pull_request",
-  "arguments": {
-    "title": "Add runtime hardening",
-    "source_branch": "feature/runtime-hardening",
-    "destination_branch": "main",
-    "description": "Tighten config validation and session handling."
-  }
+    "tool": "create_pull_request",
+    "arguments": {
+        "title": "Add runtime hardening",
+        "source_branch": "feature/runtime-hardening",
+        "destination_branch": "main",
+        "description": "Tighten config validation and session handling."
+    }
 }
 ```
 
@@ -163,10 +163,10 @@ Inspect pull request statuses:
 
 ```json
 {
-  "tool": "get_pull_request_statuses",
-  "arguments": {
-    "pr_id": 42
-  }
+    "tool": "get_pull_request_statuses",
+    "arguments": {
+        "pr_id": 42
+    }
 }
 ```
 
@@ -174,10 +174,10 @@ Read failed pipeline output:
 
 ```json
 {
-  "tool": "get_pipeline_failure_output",
-  "arguments": {
-    "pipeline_ref": "{11111111-2222-3333-4444-555555555555}"
-  }
+    "tool": "get_pipeline_failure_output",
+    "arguments": {
+        "pipeline_ref": "{11111111-2222-3333-4444-555555555555}"
+    }
 }
 ```
 
