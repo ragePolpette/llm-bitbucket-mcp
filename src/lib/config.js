@@ -268,8 +268,8 @@ export function getConfigFromEnv(env = process.env) {
         bitbucket: {
             userEmail,
             apiToken,
-            workspace: readTrimmed(env, "BITBUCKET_WORKSPACE", "studioboost"),
-            repoSlug: readTrimmed(env, "BITBUCKET_REPO_SLUG", "bpopilot"),
+            workspace: readTrimmed(env, "BITBUCKET_WORKSPACE", "workspace-slug"),
+            repoSlug: readTrimmed(env, "BITBUCKET_REPO_SLUG", "repo-slug"),
             defaultDestinationBranch: readTrimmed(env, "BITBUCKET_DEFAULT_DESTINATION_BRANCH"),
             apiBase: "https://api.bitbucket.org",
         },
