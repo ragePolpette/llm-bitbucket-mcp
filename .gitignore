@@ -1,2 +1,7 @@
 node_modules/
 .env
+
+# Local agent instruction files
+AGENTS.md
+CLAUDE.md
+HARNESS_IMPLEMENTATION_PROMPT.md

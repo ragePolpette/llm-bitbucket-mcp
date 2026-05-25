@@ -188,7 +188,6 @@ This repository is in active development, but the current tool surface is alread
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md)
-- [ROADMAP_CHECKLIST.md](ROADMAP_CHECKLIST.md)
 - [Dockerfile](Dockerfile)
 - [.env.example](.env.example)
 
