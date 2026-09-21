@@ -31,6 +31,42 @@ test("getConfigFromEnv applies safe runtime defaults", () => {
     ]);
 });
 
+test("getConfigFromEnv parses multiple repositories and a default selector", () => {
+    const config = getConfigFromEnv(
+        createValidEnv({
+            BITBUCKET_REPOSITORIES_JSON: JSON.stringify([
+                {
+                    id: "one",
+                    workspace: "workspace",
+                    repoSlug: "repo-one",
+                    defaultDestinationBranch: "main",
+                },
+                { id: "two", workspace: "workspace", repoSlug: "repo-two", status: "disabled" },
+            ]),
+            BITBUCKET_DEFAULT_REPOSITORY: "one",
+        }),
+    );
+
+    assert.equal(config.bitbucket.repositories.length, 2);
+    assert.equal(config.bitbucket.defaultRepositoryId, "one");
+    assert.equal(config.bitbucket.repositories[0].repoSlug, "repo-one");
+});
+
+test("getConfigFromEnv rejects duplicate repository ids", () => {
+    assert.throws(
+        () =>
+            getConfigFromEnv(
+                createValidEnv({
+                    BITBUCKET_REPOSITORIES_JSON: JSON.stringify([
+                        { id: "same", workspace: "workspace", repoSlug: "one" },
+                        { id: "same", workspace: "workspace", repoSlug: "two" },
+                    ]),
+                }),
+            ),
+        /Repository id duplicato/,
+    );
+});
+
 test("getConfigFromEnv reports aggregated validation errors", () => {
     assert.throws(
         () =>
