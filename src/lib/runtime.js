@@ -3,6 +3,7 @@ import { BitbucketClient } from "./bitbucket-client.js";
 import { getConfig } from "./config.js";
 import * as logger from "./logger.js";
 import { createRuntimeMetrics } from "./runtime-metrics.js";
+import { BitbucketRepositoryRegistry } from "./repository-registry.js";
 import { createSessionStore } from "./session-store.js";
 
 export function createSessionStoreFromConfig(config) {
@@ -12,20 +13,28 @@ export function createSessionStoreFromConfig(config) {
     });
 }
 
-export function createBitbucketClientFromConfig(config, metrics) {
+export function createBitbucketClientFromConfig(config, repository, metrics) {
     return new BitbucketClient({
         apiBase: config.bitbucket.apiBase,
-        workspace: config.bitbucket.workspace,
-        repoSlug: config.bitbucket.repoSlug,
+        workspace: repository.workspace,
+        repoSlug: repository.repoSlug,
         userEmail: config.bitbucket.userEmail,
         apiToken: config.bitbucket.apiToken,
-        defaultDestinationBranch: config.bitbucket.defaultDestinationBranch,
+        defaultDestinationBranch: repository.defaultDestinationBranch,
         requestTimeoutMs: config.requestTimeoutMs,
         retryMaxAttempts: config.retry.maxAttempts,
         retryBaseDelayMs: config.retry.baseDelayMs,
         maxResponseBytes: config.maxResponseBytes,
         metrics,
     });
+}
+
+export function createRepositoryRegistryFromConfig(config, metrics) {
+    return new BitbucketRepositoryRegistry(
+        config.bitbucket.repositories,
+        config.bitbucket.defaultRepositoryId,
+        (repository) => createBitbucketClientFromConfig(config, repository, metrics),
+    );
 }
 
 export function createMetricsFromConfig() {
@@ -37,20 +46,20 @@ export function createRuntime(
     {
         createMetrics = createMetricsFromConfig,
         createSessions = createSessionStoreFromConfig,
-        createClient = createBitbucketClientFromConfig,
+        createRegistry = createRepositoryRegistryFromConfig,
         createHttpApp = createApp,
     } = {},
 ) {
     const metrics = createMetrics(config);
     const sessions = createSessions(config);
-    const client = createClient(config, metrics);
-    const app = createHttpApp(config, sessions, client, metrics);
+    const repositories = createRegistry(config, metrics);
+    const app = createHttpApp(config, sessions, repositories, metrics);
 
     return {
         config,
         metrics,
         sessions,
-        client,
+        repositories,
         app,
     };
 }

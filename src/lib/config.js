@@ -177,6 +177,98 @@ function validateEnabledWriteTools(writeTools, errors) {
     }
 }
 
+function validateRepositoryPart(value, key, errors) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value)) {
+        errors.push(
+            `${key} deve contenere solo lettere, numeri, _, - o . e iniziare con lettera o numero.`,
+        );
+    }
+}
+
+function parseRepositories(env, errors) {
+    const rawJson = readTrimmed(env, "BITBUCKET_REPOSITORIES_JSON");
+    const legacyWorkspace = readTrimmed(env, "BITBUCKET_WORKSPACE", "workspace-slug");
+    const legacyRepoSlug = readTrimmed(env, "BITBUCKET_REPO_SLUG", "repo-slug");
+    const legacyBranch = readTrimmed(env, "BITBUCKET_DEFAULT_DESTINATION_BRANCH");
+    let rawRepositories;
+
+    if (rawJson) {
+        try {
+            rawRepositories = JSON.parse(rawJson);
+        } catch {
+            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere JSON valido.");
+            return { repositories: [], defaultRepositoryId: "" };
+        }
+        if (!Array.isArray(rawRepositories) || rawRepositories.length === 0) {
+            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere un array non vuoto.");
+            return { repositories: [], defaultRepositoryId: "" };
+        }
+    } else {
+        rawRepositories = [
+            {
+                id: "default",
+                displayName: legacyRepoSlug,
+                workspace: legacyWorkspace,
+                repoSlug: legacyRepoSlug,
+                defaultDestinationBranch: legacyBranch,
+                status: "active",
+            },
+        ];
+    }
+
+    const repositories = [];
+    const ids = new Set();
+    for (const [index, raw] of rawRepositories.entries()) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            errors.push(`BITBUCKET_REPOSITORIES_JSON[${index}] deve essere un oggetto.`);
+            continue;
+        }
+        const id = String(raw.id || "").trim();
+        const workspace = String(raw.workspace || "").trim();
+        const repoSlug = String(raw.repoSlug || raw.repo_slug || "").trim();
+        const status = String(raw.status || "active")
+            .trim()
+            .toLowerCase();
+        if (!id || !workspace || !repoSlug) {
+            errors.push(`BITBUCKET_REPOSITORIES_JSON[${index}] richiede id, workspace e repoSlug.`);
+            continue;
+        }
+        validateRepositoryPart(id, `repository id '${id}'`, errors);
+        validateRepositoryPart(workspace, `workspace '${workspace}'`, errors);
+        validateRepositoryPart(repoSlug, `repoSlug '${repoSlug}'`, errors);
+        if (ids.has(id)) errors.push(`Repository id duplicato: ${id}`);
+        if (!new Set(["active", "disabled"]).has(status)) {
+            errors.push(`Repository '${id}' deve avere status active o disabled.`);
+        }
+        ids.add(id);
+        repositories.push({
+            id,
+            displayName: String(raw.displayName || raw.display_name || id).trim() || id,
+            workspace,
+            repoSlug,
+            defaultDestinationBranch: String(
+                raw.defaultDestinationBranch || raw.default_destination_branch || "",
+            ).trim(),
+            status,
+        });
+    }
+
+    const defaultRepositoryId = readTrimmed(
+        env,
+        "BITBUCKET_DEFAULT_REPOSITORY",
+        rawJson ? "" : "default",
+    );
+    if (
+        defaultRepositoryId &&
+        !repositories.some(
+            (repository) => repository.id === defaultRepositoryId && repository.status === "active",
+        )
+    ) {
+        errors.push("BITBUCKET_DEFAULT_REPOSITORY deve indicare un repository attivo configurato.");
+    }
+    return { repositories, defaultRepositoryId };
+}
+
 export function getConfigFromEnv(env = process.env) {
     const localFallback = getLocalHostFallback();
     const errors = [];
@@ -259,6 +351,7 @@ export function getConfigFromEnv(env = process.env) {
     validateServerPath(serverPath, errors);
     validateInternalApiKey(internalApiKey, "MCP_BB_INTERNAL_API_KEY", errors);
     validateEnabledWriteTools(enabledWriteTools, errors);
+    const repositoryConfig = parseRepositories(env, errors);
 
     if (errors.length) {
         throw new Error(`Configurazione non valida:\n- ${errors.join("\n- ")}`);
@@ -268,9 +361,8 @@ export function getConfigFromEnv(env = process.env) {
         bitbucket: {
             userEmail,
             apiToken,
-            workspace: readTrimmed(env, "BITBUCKET_WORKSPACE", "workspace-slug"),
-            repoSlug: readTrimmed(env, "BITBUCKET_REPO_SLUG", "repo-slug"),
-            defaultDestinationBranch: readTrimmed(env, "BITBUCKET_DEFAULT_DESTINATION_BRANCH"),
+            repositories: repositoryConfig.repositories,
+            defaultRepositoryId: repositoryConfig.defaultRepositoryId,
             apiBase: "https://api.bitbucket.org",
         },
         requestTimeoutMs,

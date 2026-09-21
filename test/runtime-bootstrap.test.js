@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     createBitbucketClientFromConfig,
     createMetricsFromConfig,
+    createRepositoryRegistryFromConfig,
     createRuntime,
     createSessionStoreFromConfig,
     startServer,
@@ -13,11 +14,19 @@ function createTestConfig() {
     return {
         bitbucket: {
             apiBase: "https://api.bitbucket.org",
-            workspace: "workspace-slug",
-            repoSlug: "repo-slug",
             userEmail: "dev@example.com",
             apiToken: "runtime-token",
-            defaultDestinationBranch: "main",
+            defaultRepositoryId: "primary",
+            repositories: [
+                {
+                    id: "primary",
+                    displayName: "Primary",
+                    workspace: "workspace-slug",
+                    repoSlug: "repo-slug",
+                    defaultDestinationBranch: "main",
+                    status: "active",
+                },
+            ],
         },
         requestTimeoutMs: 30_000,
         retry: {
@@ -54,13 +63,22 @@ test("createSessionStoreFromConfig maps runtime session policy", () => {
 });
 
 test("createBitbucketClientFromConfig maps runtime Bitbucket settings", () => {
-    const client = createBitbucketClientFromConfig(createTestConfig());
+    const config = createTestConfig();
+    const client = createBitbucketClientFromConfig(config, config.bitbucket.repositories[0]);
 
     assert.equal(client.defaultDestinationBranch, "main");
     assert.deepEqual(client.repoScope, {
         workspace: "workspace-slug",
         repoSlug: "repo-slug",
     });
+});
+
+test("repository registry selects configured clients and rejects unknown ids", () => {
+    const registry = createRepositoryRegistryFromConfig(createTestConfig());
+
+    assert.equal(registry.resolve().id, "primary");
+    assert.equal(registry.resolve("primary").client.repoScope.repoSlug, "repo-slug");
+    assert.throws(() => registry.resolve("unknown"), /non configurato/);
 });
 
 test("createMetricsFromConfig creates runtime counters", () => {
@@ -77,7 +95,7 @@ test("createRuntime wires config, sessions, client and app through injectable fa
     const calls = [];
     const metrics = { kind: "metrics" };
     const sessions = { kind: "sessions" };
-    const client = { kind: "client" };
+    const repositories = { kind: "repositories" };
     const app = { kind: "app" };
 
     const runtime = createRuntime(config, {
@@ -89,12 +107,18 @@ test("createRuntime wires config, sessions, client and app through injectable fa
             calls.push(["sessions", receivedConfig]);
             return sessions;
         },
-        createClient(receivedConfig, receivedMetrics) {
-            calls.push(["client", receivedConfig, receivedMetrics]);
-            return client;
+        createRegistry(receivedConfig, receivedMetrics) {
+            calls.push(["repositories", receivedConfig, receivedMetrics]);
+            return repositories;
         },
-        createHttpApp(receivedConfig, receivedSessions, receivedClient, receivedMetrics) {
-            calls.push(["app", receivedConfig, receivedSessions, receivedClient, receivedMetrics]);
+        createHttpApp(receivedConfig, receivedSessions, receivedRepositories, receivedMetrics) {
+            calls.push([
+                "app",
+                receivedConfig,
+                receivedSessions,
+                receivedRepositories,
+                receivedMetrics,
+            ]);
             return app;
         },
     });
@@ -102,14 +126,14 @@ test("createRuntime wires config, sessions, client and app through injectable fa
     assert.deepEqual(calls, [
         ["metrics", config],
         ["sessions", config],
-        ["client", config, metrics],
-        ["app", config, sessions, client, metrics],
+        ["repositories", config, metrics],
+        ["app", config, sessions, repositories, metrics],
     ]);
     assert.deepEqual(runtime, {
         config,
         metrics,
         sessions,
-        client,
+        repositories,
         app,
     });
 });

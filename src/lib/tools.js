@@ -358,13 +358,28 @@ export const TOOLS = [
  * }
  */
 
+const REPOSITORY_SELECTOR = {
+    type: "string",
+    description:
+        "ID del repository configurato. Opzionale solo se esiste un repository predefinito.",
+};
+
 export const EXPOSED_TOOL_NAMES = new Set(TOOLS.map((tool) => tool.name));
 
 export function getEnabledTools(enabledWriteTools = WRITE_TOOL_NAMES) {
     const allowedWriteTools = new Set(enabledWriteTools);
     return TOOLS.filter(
         (tool) => !WRITE_TOOL_NAMES.has(tool.name) || allowedWriteTools.has(tool.name),
-    );
+    ).map((tool) => ({
+        ...tool,
+        inputSchema: {
+            ...tool.inputSchema,
+            properties: {
+                repository_id: REPOSITORY_SELECTOR,
+                ...(tool.inputSchema.properties || {}),
+            },
+        },
+    }));
 }
 
 export function getEnabledToolNames(enabledWriteTools = WRITE_TOOL_NAMES) {

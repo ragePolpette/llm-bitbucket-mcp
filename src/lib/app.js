@@ -36,7 +36,7 @@ function asTextResult(payload) {
     };
 }
 
-function createMcpServer(client, config, metrics) {
+function createMcpServer(repositories, config, metrics) {
     const enabledTools = getEnabledTools(config.security.enabledWriteTools);
     const enabledToolNames = getEnabledToolNames(config.security.enabledWriteTools);
     const server = new Server(
@@ -56,10 +56,16 @@ function createMcpServer(client, config, metrics) {
                 }
                 throw new Error(`Tool non esposto dal surface MCP corrente: ${name}`);
             }
-            const result = await handleToolCall(name, args, client, config.security);
+            const repository = repositories.resolve(args?.repository_id);
+            const result = await handleToolCall(name, args || {}, repository.client, {
+                ...config.security,
+                repositories: repositories.list(),
+                selectedRepositoryId: repository.id,
+                defaultRepositoryId: repositories.defaultRepositoryId,
+            });
             metrics?.recordToolCall(name, "success");
             if (isWriteTool) {
-                logger.logAudit("write_tool_success", { tool: name });
+                logger.logAudit("write_tool_success", { tool: name, repository_id: repository.id });
             }
             return asTextResult(result);
         } catch (error) {
@@ -172,7 +178,7 @@ function buildMetricsPayload({ metrics, sessions, uptimeSec }) {
     };
 }
 
-export function createApp(config, sessions, client, metrics) {
+export function createApp(config, sessions, repositories, metrics) {
     const app = createMcpExpressApp({
         host: config.server.host,
         allowedHosts: config.server.allowedHosts?.length ? config.server.allowedHosts : undefined,
@@ -250,7 +256,7 @@ export function createApp(config, sessions, client, metrics) {
 
             if (!sessionId && isInitializeRequest(req.body)) {
                 logger.logInfo("session_initialize");
-                const server = createMcpServer(client, config, metrics);
+                const server = createMcpServer(repositories, config, metrics);
                 transport = new StreamableHTTPServerTransport({
                     sessionIdGenerator: () => randomUUID(),
                     enableJsonResponse: !config.server.sseEnabled,
