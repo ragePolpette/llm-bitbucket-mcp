@@ -1,12 +1,16 @@
 # llm-bitbucket-mcp
 
-`llm-bitbucket-mcp` is a local-first MCP server for Bitbucket Cloud pull request and pipeline workflows.
+A local-first MCP server that exposes Bitbucket Cloud pull request and pipeline workflows through a constrained, per-repository tool surface.
+
+[![CI](https://github.com/ragePolpette/llm-bitbucket-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/ragePolpette/llm-bitbucket-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node.js 22](https://img.shields.io/badge/node-22-339933.svg)
+
+## Overview
 
 It is designed for developer tooling, personal automation, and small-team internal environments where Bitbucket actions should be exposed through a constrained MCP surface rather than through a generic workstation agent.
 
-## What It Does
-
-The server exposes a focused Bitbucket MCP surface for:
+## Features
 
 - pull request discovery and inspection
 - diff, comments, commits, tasks, and status retrieval
@@ -18,7 +22,7 @@ The server exposes a focused Bitbucket MCP surface for:
 - multiple approved repositories selected per tool call via `repository_id`
 - a constrained repository-scoped API escape hatch kept out of the default public tool catalog
 
-Current exposed tools:
+### Exposed tools
 
 - `bitbucket_info`
 - `list_pull_requests`
@@ -41,25 +45,6 @@ Current exposed tools:
 - `run_pipeline`
 - `merge_pull_request` (only listed when at least one active repository has `allowMerge: true`)
 
-## Scope And Non-Goals
-
-In scope:
-
-- Bitbucket Cloud operations centered on pull requests
-- local or internal MCP HTTP sessions
-- runtime observability for local dashboards and agent workflows
-
-Out of scope:
-
-- local checkout and branch management
-- commit creation
-- unattended merge automation (merges always require an explicit human confirmation)
-- approval automation
-- generic git workstation orchestration
-- public multi-tenant SaaS concerns
-
-Remote Bitbucket actions belong here. Local git workflow belongs elsewhere.
-
 ## Architecture
 
 The runtime is intentionally small:
@@ -74,36 +59,31 @@ The runtime is intentionally small:
 - `src/lib/handlers.js`: MCP tool dispatch and validation
 - `src/lib/session-store.js`: bounded in-memory session lifecycle
 
-## Security Posture
+## Quick start
 
-This repository is calibrated for a local/internal tool, not for a public internet service.
+Requirements:
 
-Current guardrails:
-
-- `BITBUCKET_API_TOKEN` is rejected if loaded from `.env`
-- runtime config is validated at startup with explicit bounds
-- sessions are bounded by TTL and capacity
-- optional API-key auth can protect `/health` and `/mcp`
-- exposed write tools can be restricted through a runtime allowlist
-- read retries are bounded and only applied to safe GET flows
-- `/health` and `/metrics` stay minimal and runtime-oriented
-
-The project aims to be safe by default for local use without pretending to solve infrastructure problems outside its target scope.
-
-## Requirements
-
-- Node.js 22+
-- Bitbucket Cloud credentials provided at runtime:
-    - `BITBUCKET_USER_EMAIL`
-    - `BITBUCKET_API_TOKEN`
-
-## Setup
-
-Install dependencies:
+- Node.js 22 (see `.nvmrc`)
+- Bitbucket Cloud credentials provided at runtime: `BITBUCKET_USER_EMAIL` and `BITBUCKET_API_TOKEN`
 
 ```bash
 npm install
+export BITBUCKET_USER_EMAIL="you@example.com"
+export BITBUCKET_API_TOKEN="<api token>"
+export BITBUCKET_REPOSITORIES_JSON='[{"id":"backend","workspace":"workspace-slug","repoSlug":"repo-slug","defaultDestinationBranch":"main","status":"active"}]'
+export BITBUCKET_DEFAULT_REPOSITORY=backend
+npm start
 ```
+
+Default endpoints:
+
+- health: `http://127.0.0.1:8783/health`
+- metrics: `http://127.0.0.1:8783/metrics`
+- MCP: `http://127.0.0.1:8783/mcp`
+
+A Docker image can be built with `npm run docker:build`; see the [Dockerfile](Dockerfile).
+
+## Configuration
 
 Use `.env.example` only as a configuration reference.
 
@@ -126,31 +106,7 @@ Important notes:
 
 Repositories with `allowMerge` unset or `false` reject the tool outright, and the tool is not even listed when no active repository allows merges.
 
-## Run
-
-```bash
-npm start
-```
-
-Default endpoints:
-
-- health: `http://127.0.0.1:8783/health`
-- metrics: `http://127.0.0.1:8783/metrics`
-- MCP: `http://127.0.0.1:8783/mcp`
-
-## Quality Gates
-
-Available commands:
-
-```bash
-npm run lint
-npm run format:check
-npm test
-npm run check
-npm run docker:build
-```
-
-## Example MCP Calls
+## Usage
 
 Find an open pull request:
 
@@ -227,16 +183,70 @@ Merge a pull request (first call returns the summary and token, second call conf
 }
 ```
 
+## Security
+
+This repository is calibrated for a local/internal tool, not for a public internet service.
+
+Current guardrails:
+
+- `BITBUCKET_API_TOKEN` is rejected if loaded from `.env`
+- runtime config is validated at startup with explicit bounds
+- sessions are bounded by TTL and capacity
+- optional API-key auth can protect `/health` and `/mcp`
+- exposed write tools can be restricted through a runtime allowlist
+- read retries are bounded and only applied to safe GET flows
+- `/health` and `/metrics` stay minimal and runtime-oriented
+
+The project aims to be safe by default for local use without pretending to solve infrastructure problems outside its target scope.
+
+See [SECURITY.md](SECURITY.md) for the threat model and how to report vulnerabilities.
+
+## Scope And Non-Goals
+
+In scope:
+
+- Bitbucket Cloud operations centered on pull requests
+- local or internal MCP HTTP sessions
+- runtime observability for local dashboards and agent workflows
+
+Out of scope:
+
+- local checkout and branch management
+- commit creation
+- unattended merge automation (merges always require an explicit human confirmation)
+- approval automation
+- generic git workstation orchestration
+- public multi-tenant SaaS concerns
+
+Remote Bitbucket actions belong here. Local git workflow belongs elsewhere.
+
+## Development
+
+```bash
+npm run lint
+npm run format:check
+npm test
+npm run check
+```
+
+`npm run check` runs lint, the Prettier check and the tests. See [CONTRIBUTING.md](CONTRIBUTING.md) and [RELEASE.md](RELEASE.md).
+
 ## Project Status
 
-This repository is in active development, but the current tool surface is already stable enough for real local/internal workflows. Sensitive write operations such as approval and merge remain intentionally out of the exposed surface.
+This repository is in active development and used for local and internal workflows. Merge is available only through the gated flow described above, and approval is not exposed.
 
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md)
-- [Dockerfile](Dockerfile)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [RELEASE.md](RELEASE.md)
 - [.env.example](.env.example)
 
 ## Development Process
 
 Built with AI-assisted workflows, while architecture, tradeoffs, integration, review, and validation were directed by the author.
+
+## License
+
+[MIT](LICENSE)

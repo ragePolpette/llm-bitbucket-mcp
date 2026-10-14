@@ -21,7 +21,7 @@ docker build --build-arg APP_VERSION=<next-version> -t llm-bitbucket-mcp:<next-v
 
 3. Ensure runtime secrets are not in repo files:
    `BITBUCKET_API_TOKEN` and `MCP_BB_INTERNAL_API_KEY` must be injected only at runtime
-   via the PowerShell launcher or the local dashboard in [mcp-dashboard](../mcp-dashboard).
+   through the process environment.
 
 ## Version Bump
 
