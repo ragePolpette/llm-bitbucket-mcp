@@ -1,16 +1,68 @@
-import { WRITE_TOOL_NAMES } from "./tool-policy.js";
+import {
+    CONFIRMED_TOOL_NAMES,
+    DEFAULT_ENABLED_WRITE_TOOLS,
+    WRITE_TOOL_NAMES,
+} from "./tool-policy.js";
 
-/**
- * Tool definitions exposed via MCP ListTools.
- *
- * NOTE: approve_pull_request has a handler implemented but is NOT exposed here yet.
- * To enable it, add its definition to the TOOLS array.
- */
+const PR_ID = { type: "integer", description: "Pull request ID." };
+
+const PIPELINE_REF = {
+    type: "string",
+    description:
+        "Bitbucket pipeline UUID, with or without braces, or a Bitbucket URL containing it.",
+};
+
+const CONFIRMATION_TOKEN = {
+    type: "string",
+    description:
+        "Token returned by the first call. Pass it only after the user explicitly confirmed in chat.",
+};
+
+const CREATE_PULL_REQUEST_SCHEMA = {
+    type: "object",
+    properties: {
+        title: { type: "string", description: "Pull request title." },
+        source_branch: { type: "string", description: "Source branch." },
+        description: { type: "string", description: "Markdown description of the pull request." },
+        destination_branch: {
+            type: "string",
+            description:
+                "Destination branch. Falls back to the repository default destination branch; fails if neither is set.",
+        },
+        reviewers: {
+            type: "array",
+            items: { type: "string" },
+            description: "Bitbucket UUIDs of the reviewers.",
+        },
+        close_source_branch: {
+            type: "boolean",
+            description: "Close the source branch after merge. Default: true.",
+        },
+    },
+    required: ["title", "source_branch"],
+};
+
+function prOnlySchema() {
+    return {
+        type: "object",
+        properties: { pr_id: PR_ID },
+        required: ["pr_id"],
+    };
+}
+
+function pipelineRefSchema() {
+    return {
+        type: "object",
+        properties: { pipeline_ref: PIPELINE_REF },
+        required: ["pipeline_ref"],
+    };
+}
 
 export const TOOLS = [
     {
         name: "bitbucket_info",
-        description: "Mappa tool, boundary operativi e opzioni runtime del server Bitbucket MCP.",
+        description:
+            "Tool map, operating boundaries and runtime options of this Bitbucket MCP server.",
         annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
@@ -21,7 +73,7 @@ export const TOOLS = [
     {
         name: "list_pull_requests",
         description:
-            "Lista le pull request del repository Bitbucket. Filtra per stato e opzionalmente per branch sorgente.",
+            "List pull requests of the Bitbucket repository. Filter by state and optionally by exact source or destination branch.",
         annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
@@ -29,22 +81,26 @@ export const TOOLS = [
                 state: {
                     type: "string",
                     enum: ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"],
-                    description: "Stato PR. Default: OPEN.",
+                    description: "Pull request state. Default: OPEN.",
                 },
                 source_branch: {
                     type: "string",
-                    description: "Filtra per branch sorgente (match esatto). Opzionale.",
+                    description: "Filter by source branch (exact match). Optional.",
+                },
+                destination_branch: {
+                    type: "string",
+                    description: "Filter by destination branch (exact match). Optional.",
                 },
                 page: {
                     type: "integer",
                     minimum: 1,
-                    description: "Pagina (1-based). Default: 1.",
+                    description: "Page number (1-based). Default: 1.",
                 },
                 pagelen: {
                     type: "integer",
                     minimum: 1,
                     maximum: 50,
-                    description: "Risultati per pagina (max 50). Default: 25.",
+                    description: "Results per page (max 50). Default: 25.",
                 },
             },
         },
@@ -52,18 +108,18 @@ export const TOOLS = [
     {
         name: "find_open_pull_request",
         description:
-            "Trova una pull request aperta per branch sorgente esatto e, opzionalmente, branch di destinazione.",
+            "Find an open pull request by exact source branch and, optionally, destination branch. Scans at most 10 result pages and reports truncated: true when the scan stopped early.",
         annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
             properties: {
                 source_branch: {
                     type: "string",
-                    description: "Branch sorgente da cercare (match esatto).",
+                    description: "Source branch to look for (exact match).",
                 },
                 destination_branch: {
                     type: "string",
-                    description: "Branch di destinazione da filtrare. Opzionale.",
+                    description: "Destination branch filter. Optional.",
                 },
             },
             required: ["source_branch"],
@@ -72,119 +128,86 @@ export const TOOLS = [
     {
         name: "get_pull_request",
         description:
-            "Dettaglio completo di una pull request (titolo, descrizione, autore, reviewers, stato, branch, date).",
+            "Full details of a pull request (title, description, author, reviewers, state, branches, dates).",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_diff",
         description:
-            "Diff unificato (patch) di una pull request. Troncato a 500KB se troppo grande.",
+            "Unified diff (patch) of a pull request. Truncated to 500 KB (UTF-8 bytes) when larger.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_comments",
         description:
-            "Tutti i commenti di una pull request (generali + inline). Paginazione automatica, cap 500.",
+            "All comments of a pull request (general and inline), with parent_id for replies. Automatic pagination, capped at 500.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_commits",
         description:
-            "Lista i commit inclusi nella pull request, in ordine cronologico. Paginazione automatica, cap 500.",
+            "List the commits included in the pull request. Automatic pagination, capped at 500.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_statuses",
         description:
-            "Restituisce gli status di build/check associati alla pull request. Paginazione automatica, cap 500.",
+            "Build and check statuses attached to the pull request. Automatic pagination, capped at 500.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_tasks",
         description:
-            "Lista i task della pull request, inclusi stato e commento collegato. Paginazione automatica, cap 500.",
+            "List the tasks of the pull request, including state and linked comment. Automatic pagination, capped at 500.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_pipelines",
         description:
-            "Risalendo da pr_id correla le pipeline della PR tramite status Bitbucket e commit sorgente, con fallback sulla branch sorgente.",
+            "Starting from pr_id, correlate the pull request pipelines through Bitbucket statuses and the source commit, falling back to the source branch.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pull_request_pipeline_failure_output",
         description:
-            "Partendo da pr_id trova le pipeline correlate alla PR tramite status/build Bitbucket e restituisce i log degli step falliti.",
+            "Starting from pr_id, find the pipelines related to the pull request through Bitbucket statuses and return the logs of the failed steps.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
-            },
-            required: ["pr_id"],
-        },
+        inputSchema: prOnlySchema(),
     },
     {
         name: "get_pipeline_run",
         description:
-            "Dettaglio sintetico di una pipeline Bitbucket: stato, risultato, branch/commit target, build number e link.",
+            "Summary of a Bitbucket pipeline: state, result, target branch and commit, build number and link.",
+        annotations: { readOnlyHint: true },
+        inputSchema: pipelineRefSchema(),
+    },
+    {
+        name: "wait_for_pipeline",
+        description:
+            "Poll a pipeline until it completes or pauses, or until timeout_seconds elapses (max 600). Returns the last observed state with completed and timed_out flags. Read-only. Your MCP client may enforce a shorter request timeout.",
         annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
             properties: {
-                pipeline_ref: {
-                    type: "string",
-                    description:
-                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
+                pipeline_ref: PIPELINE_REF,
+                timeout_seconds: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 600,
+                    description: "Maximum time to wait, in seconds. Default: 300.",
+                },
+                poll_interval_seconds: {
+                    type: "integer",
+                    minimum: 5,
+                    maximum: 60,
+                    description: "Delay between polls, in seconds. Default: 15.",
                 },
             },
             required: ["pipeline_ref"],
@@ -193,54 +216,29 @@ export const TOOLS = [
     {
         name: "get_pipeline_failure_output",
         description:
-            "Recupera gli step falliti di una pipeline e il relativo output log, troncato in modo sicuro se troppo lungo.",
+            "Return the failed steps of a pipeline and their log output, safely truncated when too long.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pipeline_ref: {
-                    type: "string",
-                    description:
-                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
-                },
-            },
-            required: ["pipeline_ref"],
-        },
+        inputSchema: pipelineRefSchema(),
     },
     {
         name: "list_pipeline_steps",
         description:
-            "Elenca gli step di una pipeline Bitbucket con stato, risultato e durata, senza scaricare i log.",
+            "List the steps of a Bitbucket pipeline with state, result and duration, without downloading logs.",
         annotations: { readOnlyHint: true },
-        inputSchema: {
-            type: "object",
-            properties: {
-                pipeline_ref: {
-                    type: "string",
-                    description:
-                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
-                },
-            },
-            required: ["pipeline_ref"],
-        },
+        inputSchema: pipelineRefSchema(),
     },
     {
         name: "get_pipeline_step_log",
         description:
-            "Legge il log testuale di uno step di pipeline (qualsiasi stato, non solo fallito), troncato in modo sicuro se troppo lungo.",
+            "Read the text log of a pipeline step (any state, not only failed), safely truncated when too long.",
         annotations: { readOnlyHint: true },
         inputSchema: {
             type: "object",
             properties: {
-                pipeline_ref: {
-                    type: "string",
-                    description:
-                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
-                },
+                pipeline_ref: PIPELINE_REF,
                 step_uuid: {
                     type: "string",
-                    description:
-                        "UUID dello step, con o senza parentesi graffe (da list_pipeline_steps).",
+                    description: "Step UUID, with or without braces (from list_pipeline_steps).",
                 },
             },
             required: ["pipeline_ref", "step_uuid"],
@@ -251,110 +249,131 @@ export const TOOLS = [
     {
         name: "add_pull_request_comment",
         description:
-            "Posta un commento su una pull request. Generale o inline (su file/riga specifici). Supporta Markdown.",
+            "Post a comment on a pull request, either general or inline (on a specific file and line). Supports Markdown.",
         annotations: { readOnlyHint: false, idempotentHint: false },
         inputSchema: {
             type: "object",
             properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
+                pr_id: PR_ID,
                 content: {
                     type: "string",
-                    description: "Testo del commento (Markdown supportato).",
+                    description: "Comment text (Markdown supported).",
                 },
                 file_path: {
                     type: "string",
-                    description:
-                        "Path del file per commento inline. Omettere per commento generale.",
+                    description: "File path for an inline comment. Omit for a general comment.",
                 },
                 line_to: {
                     type: "integer",
-                    description: "Numero riga (nel nuovo file) per commento inline.",
+                    description: "Line number (in the new file) for an inline comment.",
                 },
             },
             required: ["pr_id", "content"],
         },
     },
     {
-        name: "create_pull_request",
-        description:
-            "Crea una nuova pull request su Bitbucket dal branch sorgente verso il branch di destinazione.",
+        name: "reply_to_pull_request_comment",
+        description: "Reply to an existing pull request comment. Supports Markdown.",
         annotations: { readOnlyHint: false, idempotentHint: false },
         inputSchema: {
             type: "object",
             properties: {
-                title: { type: "string", description: "Titolo della PR." },
-                source_branch: { type: "string", description: "Branch sorgente." },
-                description: { type: "string", description: "Descrizione Markdown della PR." },
-                destination_branch: {
-                    type: "string",
+                pr_id: PR_ID,
+                parent_id: {
+                    type: "integer",
                     description:
-                        "Branch destinazione. Se omesso usa BITBUCKET_DEFAULT_DESTINATION_BRANCH; se assente fallisce.",
+                        "ID of the comment being replied to (from get_pull_request_comments).",
                 },
-                reviewers: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "UUID Bitbucket dei reviewer.",
-                },
-                close_source_branch: {
-                    type: "boolean",
-                    description: "Chiudi il branch sorgente dopo il merge. Default: true.",
+                content: {
+                    type: "string",
+                    description: "Reply text (Markdown supported).",
                 },
             },
-            required: ["title", "source_branch"],
+            required: ["pr_id", "parent_id", "content"],
         },
+    },
+    {
+        name: "create_pull_request_task",
+        description: "Create a task on a pull request, optionally attached to an existing comment.",
+        annotations: { readOnlyHint: false, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: PR_ID,
+                content: { type: "string", description: "Task text." },
+                comment_id: {
+                    type: "integer",
+                    description: "ID of the comment the task is attached to. Optional.",
+                },
+            },
+            required: ["pr_id", "content"],
+        },
+    },
+    {
+        name: "resolve_pull_request_task",
+        description: "Mark a pull request task as resolved.",
+        annotations: { readOnlyHint: false, idempotentHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: PR_ID,
+                task_id: {
+                    type: "integer",
+                    description: "Task ID (from get_pull_request_tasks).",
+                },
+            },
+            required: ["pr_id", "task_id"],
+        },
+    },
+    {
+        name: "approve_pull_request",
+        description: "Approve a pull request as the authenticated Bitbucket user.",
+        annotations: { readOnlyHint: false, idempotentHint: true },
+        inputSchema: prOnlySchema(),
+    },
+    {
+        name: "unapprove_pull_request",
+        description: "Remove the approval of the authenticated Bitbucket user from a pull request.",
+        annotations: { readOnlyHint: false, idempotentHint: true },
+        inputSchema: prOnlySchema(),
+    },
+    {
+        name: "create_pull_request",
+        description:
+            "Create a new Bitbucket pull request from the source branch to the destination branch.",
+        annotations: { readOnlyHint: false, idempotentHint: false },
+        inputSchema: CREATE_PULL_REQUEST_SCHEMA,
     },
     {
         name: "open_pull_request",
         description:
-            "Alias ergonomico di create_pull_request, con lo stesso contract e la stessa logica di creazione.",
+            "Ergonomic alias of create_pull_request, with the same contract and creation logic.",
         annotations: { readOnlyHint: false, idempotentHint: false },
-        inputSchema: {
-            type: "object",
-            properties: {
-                title: { type: "string", description: "Titolo della PR." },
-                source_branch: { type: "string", description: "Branch sorgente." },
-                description: { type: "string", description: "Descrizione Markdown della PR." },
-                destination_branch: {
-                    type: "string",
-                    description:
-                        "Branch destinazione. Se omesso usa BITBUCKET_DEFAULT_DESTINATION_BRANCH; se assente fallisce.",
-                },
-                reviewers: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "UUID Bitbucket dei reviewer.",
-                },
-                close_source_branch: {
-                    type: "boolean",
-                    description: "Chiudi il branch sorgente dopo il merge. Default: true.",
-                },
-            },
-            required: ["title", "source_branch"],
-        },
+        inputSchema: CREATE_PULL_REQUEST_SCHEMA,
     },
     {
         name: "run_pipeline",
         description:
-            "Avvia una pipeline Bitbucket su un branch. Senza pipeline_name esegue la pipeline predefinita del branch; con pipeline_name esegue la custom pipeline indicata.",
+            "Start a Bitbucket pipeline on a branch. Without pipeline_name runs the default pipeline of the branch; with pipeline_name runs that custom pipeline.",
         annotations: { readOnlyHint: false, idempotentHint: false },
         inputSchema: {
             type: "object",
             properties: {
-                branch: { type: "string", description: "Branch su cui avviare la pipeline." },
+                branch: { type: "string", description: "Branch to run the pipeline on." },
                 pipeline_name: {
                     type: "string",
                     description:
-                        "Nome della custom pipeline (sezione pipelines.custom di bitbucket-pipelines.yml). Omettere per la pipeline di default del branch.",
+                        "Custom pipeline name (pipelines.custom section of bitbucket-pipelines.yml). Omit for the default pipeline of the branch.",
                 },
                 commit_hash: {
                     type: "string",
                     description:
-                        "Commit specifico (hash completo a 40 caratteri) su cui eseguire la pipeline. Default: HEAD del branch.",
+                        "Specific commit (full 40 character hash) to run the pipeline on. Default: branch HEAD.",
                 },
                 variables: {
                     type: "object",
                     description:
-                        "Variabili pipeline in forma chiave -> valore, passate come variabili non segrete.",
+                        "Pipeline variables as key -> value, passed as non-secret variables.",
                     additionalProperties: { type: "string" },
                 },
             },
@@ -364,32 +383,44 @@ export const TOOLS = [
     {
         name: "merge_pull_request",
         description:
-            "Merge di una pull request in due passi. Prima chiamata senza confirmation_token: restituisce il riepilogo della PR e un token. " +
-            "Chiedi SEMPRE conferma esplicita all'utente in chat mostrando il riepilogo; solo dopo la conferma richiama il tool con lo stesso pr_id e il confirmation_token. " +
-            "Disponibile solo per i repository con allowMerge attivo. Operazione irreversibile.",
+            "Merge a pull request in two steps. First call without confirmation_token: returns the pull request summary and a token. " +
+            "ALWAYS ask the user for explicit confirmation in chat showing the summary; only after confirmation call the tool again with the same parameters and the confirmation_token. " +
+            "Only available for repositories with allowMerge enabled. Irreversible operation.",
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
         inputSchema: {
             type: "object",
             properties: {
-                pr_id: { type: "integer", description: "ID della Pull Request." },
+                pr_id: PR_ID,
                 merge_strategy: {
                     type: "string",
                     enum: ["merge_commit", "squash", "fast_forward"],
-                    description: "Strategia di merge. Default: merge_commit.",
+                    description: "Merge strategy. Default: merge_commit.",
                 },
                 close_source_branch: {
                     type: "boolean",
-                    description: "Chiudi il branch sorgente dopo il merge. Default: true.",
+                    description: "Close the source branch after merge. Default: true.",
                 },
                 message: {
                     type: "string",
-                    description: "Messaggio del commit di merge. Opzionale.",
+                    description: "Merge commit message. Optional.",
                 },
-                confirmation_token: {
-                    type: "string",
-                    description:
-                        "Token ricevuto dalla prima chiamata. Passarlo solo dopo che l'utente ha confermato esplicitamente in chat.",
-                },
+                confirmation_token: CONFIRMATION_TOKEN,
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
+        name: "decline_pull_request",
+        description:
+            "Decline a pull request in two steps. First call without confirmation_token: returns the pull request summary and a token. " +
+            "ALWAYS ask the user for explicit confirmation in chat showing the summary; only after confirmation call the tool again with the same pr_id and the confirmation_token. " +
+            "Only available for repositories with allowMerge enabled.",
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: PR_ID,
+                confirmation_token: CONFIRMATION_TOKEN,
             },
             required: ["pr_id"],
         },
@@ -397,46 +428,19 @@ export const TOOLS = [
 ];
 
 /*
- * ── Tool definitions ready but NOT exposed ─────────────────────
- * Uncomment and add to TOOLS array to enable:
+ * bb_api has an internal handler but is intentionally NOT exposed. Its definition would be:
  *
- * {
- *     name: "approve_pull_request",
- *     description: "Approva una pull request (come utente autenticato).",
- *     annotations: { readOnlyHint: false, idempotentHint: true },
- *     inputSchema: {
- *         type: "object",
- *         properties: { pr_id: { type: "integer", description: "ID della Pull Request." } },
- *         required: ["pr_id"]
- *     }
- * },
  * {
  *     name: "bb_api",
  *     description:
- *         "Chiamata generica read-only all'API Bitbucket REST 2.0. Supporta solo GET per endpoint non coperti dai tool semantici.",
+ *         "Generic read-only call to the Bitbucket REST 2.0 API, limited to GET on the selected repository.",
  *     annotations: { readOnlyHint: true },
  *     inputSchema: {
  *         type: "object",
  *         properties: {
- *             method: {
- *                 type: "string",
- *                 enum: ["GET"],
- *                 description: "Metodo HTTP consentito. Solo GET.",
- *             },
- *             path: {
- *                 type: "string",
- *                 description:
- *                     "API path read-only (es. '/repositories/workspace-slug/repo-slug/pipelines'). /2.0/ preposto automaticamente se mancante.",
- *             },
- *             body: {
- *                 type: "object",
- *                 description: "Non usato. Lasciare vuoto.",
- *             },
- *             queryParams: {
- *                 type: "object",
- *                 description: 'Query string params (es. {"state": "OPEN"}).',
- *                 additionalProperties: { type: "string" },
- *             },
+ *             method: { type: "string", enum: ["GET"] },
+ *             path: { type: "string" },
+ *             queryParams: { type: "object", additionalProperties: { type: "string" } },
  *         },
  *         required: ["method", "path"],
  *     }
@@ -445,8 +449,7 @@ export const TOOLS = [
 
 const REPOSITORY_SELECTOR = {
     type: "string",
-    description:
-        "ID del repository configurato. Opzionale solo se esiste un repository predefinito.",
+    description: "ID of the configured repository. Optional only when a default repository exists.",
 };
 
 export const EXPOSED_TOOL_NAMES = new Set(TOOLS.map((tool) => tool.name));
@@ -454,12 +457,12 @@ export const EXPOSED_TOOL_NAMES = new Set(TOOLS.map((tool) => tool.name));
 export const MERGE_TOOL_NAME = "merge_pull_request";
 
 export function getEnabledTools(
-    enabledWriteTools = WRITE_TOOL_NAMES,
+    enabledWriteTools = DEFAULT_ENABLED_WRITE_TOOLS,
     { mergeAvailable = true } = {},
 ) {
     const allowedWriteTools = new Set(enabledWriteTools);
     return TOOLS.filter((tool) => {
-        if (tool.name === MERGE_TOOL_NAME && !mergeAvailable) {
+        if (CONFIRMED_TOOL_NAMES.has(tool.name) && !mergeAvailable) {
             return false;
         }
         return !WRITE_TOOL_NAMES.has(tool.name) || allowedWriteTools.has(tool.name);
@@ -475,6 +478,22 @@ export function getEnabledTools(
     }));
 }
 
-export function getEnabledToolNames(enabledWriteTools = WRITE_TOOL_NAMES, options = {}) {
+export function getEnabledToolNames(enabledWriteTools = DEFAULT_ENABLED_WRITE_TOOLS, options = {}) {
     return new Set(getEnabledTools(enabledWriteTools, options).map((tool) => tool.name));
+}
+
+export function buildToolMap(toolNames = EXPOSED_TOOL_NAMES) {
+    const allowed = new Set(toolNames);
+    const toolMap = { discovery: [], pr_write: [], pipeline_write: [], utility: [] };
+    for (const tool of TOOLS) {
+        if (!allowed.has(tool.name)) continue;
+        if (!WRITE_TOOL_NAMES.has(tool.name)) {
+            toolMap.discovery.push(tool.name);
+        } else if (tool.name.includes("pipeline")) {
+            toolMap.pipeline_write.push(tool.name);
+        } else {
+            toolMap.pr_write.push(tool.name);
+        }
+    }
+    return toolMap;
 }

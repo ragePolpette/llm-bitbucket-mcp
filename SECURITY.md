@@ -6,7 +6,7 @@
 
 - this repository's source code and Docker packaging
 - leakage or mishandling of the Bitbucket API token or the optional MCP API key
-- bypass of the repository registry, the write-tool allowlist, the per-repository `allowMerge` switch or the merge confirmation flow
+- bypass of the repository registry, the write-tool allowlist, the per-repository `allowMerge` switch or the merge and decline confirmation flow
 - bypass of the optional API-key authentication, host or origin checks, or session limits
 
 ## Threat Model
@@ -18,8 +18,9 @@ The main risk considered is an MCP client, including an LLM agent, performing ac
 - `BITBUCKET_API_TOKEN` and `MCP_BB_INTERNAL_API_KEY` are rejected if they are loaded from `.env`; they must be provided through the process environment
 - the Bitbucket client only operates on repositories listed in the registry
 - write tools can be restricted with `MCP_BB_ENABLED_WRITE_TOOLS`
-- `merge_pull_request` is only listed when a repository sets `allowMerge: true`, and always requires a summary step followed by a single-use confirmation token bound to repository, pull request and merge parameters
-- optional API-key authentication protects `/health` and `/mcp`
+- review tools (approve, unapprove, replies, tasks, decline) are opt-in and disabled unless listed in `MCP_BB_ENABLED_WRITE_TOOLS`
+- `merge_pull_request` and `decline_pull_request` are only listed when a repository sets `allowMerge: true`, and always require a summary step followed by a single-use confirmation token bound to the requesting MCP session, the repository, the pull request and the operation parameters
+- optional API-key authentication protects `/mcp` and `/metrics`; unauthenticated `/health` requests only receive a minimal liveness payload
 - the server binds to `127.0.0.1` by default and validates allowed hosts and origins
 - sessions are bounded by TTL and capacity, and read retries only apply to safe GET requests
 

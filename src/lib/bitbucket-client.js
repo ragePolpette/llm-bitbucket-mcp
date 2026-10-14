@@ -1,4 +1,5 @@
 import * as logger from "./logger.js";
+import { MAX_RETRY_DELAY_MS } from "./runtime-policy.js";
 
 export class BitbucketApiError extends Error {
     constructor(status, statusText, body) {
@@ -11,11 +12,11 @@ export class BitbucketApiError extends Error {
 }
 
 const FRIENDLY_ERRORS = {
-    401: "Auth failed. Verifica BITBUCKET_USER_EMAIL / BITBUCKET_API_TOKEN.",
-    403: "Permission denied. Verifica scope API Token (Repositories: Read, Pull requests: Read+Write, Pipelines: Read/Write se usi i tool pipeline).",
-    404: "Risorsa non trovata.",
-    406: "Not Acceptable. Bitbucket non serve la risorsa nel formato richiesto (header Accept).",
-    429: "Rate limited da Bitbucket. Riprova tra qualche secondo.",
+    401: "Auth failed. Check BITBUCKET_USER_EMAIL / BITBUCKET_API_TOKEN.",
+    403: "Permission denied. Check the API token scopes (Repositories: Read, Pull requests: Read+Write, Pipelines: Read/Write for pipeline tools).",
+    404: "Resource not found.",
+    406: "Not Acceptable. Bitbucket cannot serve the resource in the requested format (Accept header).",
+    429: "Rate limited by Bitbucket. Retry in a few seconds.",
 };
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
 
@@ -42,17 +43,58 @@ function parseRetryAfterMs(retryAfterHeader) {
     return Math.max(0, dateValue - Date.now());
 }
 
-function computeRetryDelayMs(attempt, baseDelayMs, retryAfterMs) {
-    if (retryAfterMs > 0) {
-        return retryAfterMs;
+export function computeRetryDelayMs(attempt, baseDelayMs, retryAfterMs) {
+    const delayMs = retryAfterMs > 0 ? retryAfterMs : baseDelayMs * 2 ** Math.max(0, attempt - 1);
+    return Math.min(delayMs, MAX_RETRY_DELAY_MS);
+}
+
+async function readBodyBytes(response, maxBytes) {
+    if (!response.body || typeof response.body.getReader !== "function") {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return buffer.length > maxBytes
+            ? { bytes: buffer.subarray(0, maxBytes), truncated: true }
+            : { bytes: buffer, truncated: false };
     }
-    return baseDelayMs * 2 ** Math.max(0, attempt - 1);
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    let truncated = false;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const remaining = maxBytes - total;
+        if (value.byteLength > remaining) {
+            chunks.push(Buffer.from(value.buffer, value.byteOffset, remaining));
+            total += remaining;
+            truncated = true;
+            await reader.cancel().catch(() => {});
+            break;
+        }
+        chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+        total += value.byteLength;
+    }
+    return { bytes: Buffer.concat(chunks, total), truncated };
+}
+
+export function decodeUtf8Prefix(bytes) {
+    // stream: true keeps an incomplete trailing code point buffered instead of emitting U+FFFD.
+    return new TextDecoder("utf-8").decode(bytes, { stream: true });
+}
+
+export function truncateUtf8(text, maxBytes) {
+    const value = String(text ?? "");
+    const bytes = Buffer.from(value, "utf8");
+    if (bytes.length <= maxBytes) {
+        return { text: value, truncated: false };
+    }
+    return { text: decodeUtf8Prefix(bytes.subarray(0, maxBytes)), truncated: true };
 }
 
 export function normalizeBitbucketApiPath(rawPath) {
     const apiPath = String(rawPath || "").trim();
     if (!apiPath) {
-        throw new Error("API path Bitbucket mancante.");
+        throw new Error("Missing Bitbucket API path.");
     }
     if (!apiPath.startsWith("/2.0/") && !apiPath.startsWith("/2.0")) {
         return `/2.0${apiPath.startsWith("/") ? "" : "/"}${apiPath}`;
@@ -60,10 +102,44 @@ export function normalizeBitbucketApiPath(rawPath) {
     return apiPath;
 }
 
+const UNSAFE_API_PATH_PATTERN = /[\\%]|(?:^|\/)\.{1,2}(?:[/?#]|$)/;
+
 export function isRepoScopedBitbucketApiPath(rawPath, workspace, repoSlug) {
-    const normalizedPath = normalizeBitbucketApiPath(rawPath);
+    let normalizedPath;
+    try {
+        normalizedPath = normalizeBitbucketApiPath(rawPath);
+    } catch {
+        return false;
+    }
+    if (UNSAFE_API_PATH_PATTERN.test(normalizedPath)) {
+        return false;
+    }
+
+    let resolvedPath;
+    try {
+        resolvedPath = new URL(normalizedPath, "https://bitbucket.invalid").pathname;
+    } catch {
+        return false;
+    }
     const normalizedPrefix = normalizeBitbucketApiPath(`/repositories/${workspace}/${repoSlug}`);
-    return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
+    return resolvedPath === normalizedPrefix || resolvedPath.startsWith(`${normalizedPrefix}/`);
+}
+
+function parseJsonBody(bytes, status, strict) {
+    const text = decodeUtf8Prefix(bytes).trim();
+    if (!text) {
+        return {};
+    }
+    try {
+        return JSON.parse(text);
+    } catch {
+        if (!strict) {
+            return {};
+        }
+        throw new BitbucketApiError(status, "InvalidJson", {
+            error: "Bitbucket returned a malformed JSON response.",
+        });
+    }
 }
 
 export class BitbucketClient {
@@ -189,7 +265,7 @@ export class BitbucketClient {
             clearTimeout(timer);
             if (err.name === "AbortError") {
                 throw new BitbucketApiError(0, "Timeout", {
-                    error: `Request timeout dopo ${this._timeoutMs}ms.`,
+                    error: `Request timed out after ${this._timeoutMs}ms.`,
                 });
             }
             throw new BitbucketApiError(0, "NetworkError", { error: err.message });
@@ -209,14 +285,16 @@ export class BitbucketClient {
             contentType.includes("application/octet-stream") ||
             wantsText;
 
+        const { bytes, truncated } = await readBodyBytes(response, this._maxBytes);
         let responseBody;
         if (isText && !isJson) {
-            responseBody = await response.text();
-            if (responseBody.length > this._maxBytes) {
-                responseBody = responseBody.slice(0, this._maxBytes);
-            }
+            responseBody = decodeUtf8Prefix(bytes);
+        } else if (truncated) {
+            throw new BitbucketApiError(response.status, "ResponseTooLarge", {
+                error: `Bitbucket response exceeds the ${this._maxBytes} byte limit.`,
+            });
         } else {
-            responseBody = await response.json().catch(() => ({}));
+            responseBody = parseJsonBody(bytes, response.status, response.ok);
         }
 
         if (!response.ok) {

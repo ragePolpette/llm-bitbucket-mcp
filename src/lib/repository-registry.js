@@ -14,13 +14,11 @@ export class BitbucketRepositoryRegistry {
     resolve(repositoryId) {
         const selectedId = String(repositoryId || this._defaultRepositoryId || "").trim();
         if (!selectedId) {
-            throw new Error(
-                "repository_id e' obbligatorio quando non e' configurato un repository predefinito.",
-            );
+            throw new Error("repository_id is required when no default repository is configured.");
         }
         const repository = this._repositories.get(selectedId);
         if (!repository || repository.status !== "active") {
-            throw new Error(`Repository non configurato o disabilitato: ${selectedId}`);
+            throw new Error(`Repository not configured or disabled: ${selectedId}`);
         }
         return repository;
     }

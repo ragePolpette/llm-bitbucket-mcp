@@ -78,7 +78,7 @@ test("repository registry selects configured clients and rejects unknown ids", (
 
     assert.equal(registry.resolve().id, "primary");
     assert.equal(registry.resolve("primary").client.repoScope.repoSlug, "repo-slug");
-    assert.throws(() => registry.resolve("unknown"), /non configurato/);
+    assert.throws(() => registry.resolve("unknown"), /not configured/);
 });
 
 test("createMetricsFromConfig creates runtime counters", () => {

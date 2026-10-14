@@ -15,10 +15,12 @@ It is designed for developer tooling, personal automation, and small-team intern
 - pull request discovery and inspection
 - diff, comments, commits, tasks, and status retrieval
 - pipeline lookup, step listing and log extraction (failed or any step)
+- bounded waiting for a pipeline to finish (`wait_for_pipeline`, read-only, at most 600 seconds)
 - pipeline runs on a branch (default or custom pipeline)
 - pull request creation
-- pull request comments
-- pull request merge gated per repository and by an explicit two-step confirmation
+- pull request comments and replies
+- opt-in review actions: approve, unapprove, create and resolve tasks
+- pull request merge and decline gated per repository and by an explicit two-step confirmation
 - multiple approved repositories selected per tool call via `repository_id`
 - a constrained repository-scoped API escape hatch kept out of the default public tool catalog
 
@@ -36,6 +38,7 @@ It is designed for developer tooling, personal automation, and small-team intern
 - `get_pull_request_pipelines`
 - `get_pull_request_pipeline_failure_output`
 - `get_pipeline_run`
+- `wait_for_pipeline`
 - `get_pipeline_failure_output`
 - `list_pipeline_steps`
 - `get_pipeline_step_log`
@@ -44,6 +47,15 @@ It is designed for developer tooling, personal automation, and small-team intern
 - `open_pull_request`
 - `run_pipeline`
 - `merge_pull_request` (only listed when at least one active repository has `allowMerge: true`)
+
+Opt-in write tools, only listed when named in `MCP_BB_ENABLED_WRITE_TOOLS`:
+
+- `approve_pull_request`
+- `unapprove_pull_request`
+- `reply_to_pull_request_comment`
+- `create_pull_request_task`
+- `resolve_pull_request_task`
+- `decline_pull_request` (also requires a repository with `allowMerge: true`)
 
 ## Architecture
 
@@ -94,7 +106,7 @@ Important notes:
 - `BITBUCKET_REPOSITORIES_JSON` lists the approved repositories; each entry supports `id`, `displayName`, `workspace`, `repoSlug`, `defaultDestinationBranch`, `status` (`active`/`disabled`) and `allowMerge` (default `false`)
 - `BITBUCKET_DEFAULT_REPOSITORY` selects the repository used when a tool call omits `repository_id`
 - `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG`, `BITBUCKET_DEFAULT_DESTINATION_BRANCH` and `BITBUCKET_ALLOW_MERGE` remain supported as a legacy single-repository configuration
-- `MCP_BB_ENABLED_WRITE_TOOLS` can reduce the exposed mutation surface (`add_pull_request_comment`, `create_pull_request`, `open_pull_request`, `run_pipeline`, `merge_pull_request`)
+- `MCP_BB_ENABLED_WRITE_TOOLS` is the write tool allowlist. When unset it enables `add_pull_request_comment`, `create_pull_request`, `open_pull_request`, `run_pipeline` and `merge_pull_request`. The review tools (`approve_pull_request`, `unapprove_pull_request`, `reply_to_pull_request_comment`, `create_pull_request_task`, `resolve_pull_request_task`, `decline_pull_request`) are never enabled by default: list them explicitly, together with any default tool you want to keep
 
 ### Merge Confirmation Flow
 
@@ -102,9 +114,13 @@ Important notes:
 
 1. The agent calls the tool with `pr_id` (and optional `merge_strategy`, `close_source_branch`, `message`). The server returns a pull request summary, a single-use `confirmation_token` valid for five minutes, and instructions to ask the user for confirmation.
 2. The agent shows the summary in chat and waits for an explicit "yes" from the user.
-3. Only then the agent calls the tool again with the same parameters plus `confirmation_token`. Tokens are bound to repository, pull request and merge parameters; mismatches, reuse or expiry are rejected and a new summary must be requested.
+3. Only then the agent calls the tool again with the same parameters plus `confirmation_token`. Tokens are bound to the MCP session that requested them and to repository, pull request and merge parameters; a token presented from another session, with different parameters, reused or expired is rejected and a new summary must be requested.
 
-Repositories with `allowMerge` unset or `false` reject the tool outright, and the tool is not even listed when no active repository allows merges.
+Each MCP session can hold at most 10 pending tokens (older ones of the same session are dropped first); when the server-wide limit is reached, new previews are refused instead of evicting tokens of other sessions.
+
+`decline_pull_request` uses the same two-step flow and the same per-repository `allowMerge` switch, so a repository that can be merged through MCP can also be declined, and vice versa.
+
+Repositories with `allowMerge` unset or `false` reject both tools outright, and the tools are not even listed when no active repository allows merges.
 
 ## Usage
 
@@ -144,6 +160,21 @@ Inspect pull request statuses:
     }
 }
 ```
+
+Wait for a pipeline to finish (returns the last state with `completed`, `paused` and `timed_out` flags):
+
+```json
+{
+    "tool": "wait_for_pipeline",
+    "arguments": {
+        "pipeline_ref": "{11111111-2222-3333-4444-555555555555}",
+        "timeout_seconds": 300,
+        "poll_interval_seconds": 15
+    }
+}
+```
+
+Many MCP clients cancel requests after 60 seconds or less; keep `timeout_seconds` within your client's request timeout.
 
 Read failed pipeline output:
 
@@ -192,9 +223,10 @@ Current guardrails:
 - `BITBUCKET_API_TOKEN` is rejected if loaded from `.env`
 - runtime config is validated at startup with explicit bounds
 - sessions are bounded by TTL and capacity
-- optional API-key auth can protect `/health` and `/mcp`
+- optional API-key auth protects `/mcp` and `/metrics`; `/health` stays reachable without a key (so the Docker `HEALTHCHECK` works) but then only returns `status`, `server` and `uptimeSec`, while authenticated callers get the full payload
 - exposed write tools can be restricted through a runtime allowlist
-- read retries are bounded and only applied to safe GET flows
+- read retries are bounded, only applied to safe GET flows, and `Retry-After` waits are capped at 40 seconds
+- Bitbucket responses are read with a byte limit; oversized or malformed JSON responses fail with an explicit error
 - `/health` and `/metrics` stay minimal and runtime-oriented
 
 The project aims to be safe by default for local use without pretending to solve infrastructure problems outside its target scope.
@@ -213,8 +245,8 @@ Out of scope:
 
 - local checkout and branch management
 - commit creation
-- unattended merge automation (merges always require an explicit human confirmation)
-- approval automation
+- unattended merge or decline automation (both always require an explicit human confirmation)
+- approval automation (approval tools are opt-in and act only when an agent is asked to call them)
 - generic git workstation orchestration
 - public multi-tenant SaaS concerns
 
@@ -233,7 +265,7 @@ npm run check
 
 ## Project Status
 
-This repository is in active development and used for local and internal workflows. Merge is available only through the gated flow described above, and approval is not exposed.
+This repository is in active development and used for local and internal workflows. Merge and decline are available only through the gated flow described above, and approval tools are opt-in.
 
 ## Documentation
 

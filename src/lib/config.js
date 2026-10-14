@@ -91,7 +91,7 @@ function loadDotEnvFromCwd({ forbiddenKeys = [] } = {}) {
         const key = line.slice(0, idx).trim();
         if (forbidden.has(key.toLowerCase())) {
             throw new Error(
-                `Il file .env non puo' contenere ${key}: deve essere fornito solo a runtime (es. dalla dashboard).`,
+                `The .env file must not contain ${key}: it must only be provided at runtime (for example by the launcher).`,
             );
         }
 
@@ -116,7 +116,7 @@ function readTrimmed(env, key, fallback = "") {
 function readRequiredTrimmed(env, key, errors, message) {
     const value = readTrimmed(env, key);
     if (!value) {
-        errors.push(message || `${key} e' obbligatorio.`);
+        errors.push(message || `${key} is required.`);
     }
     return value;
 }
@@ -129,11 +129,11 @@ function readBoundedInt(env, key, { fallback, min, max, errors, label }) {
 
     const parsed = Number(raw);
     if (!Number.isInteger(parsed)) {
-        errors.push(`${label || key} deve essere un intero.`);
+        errors.push(`${label || key} must be an integer.`);
         return fallback;
     }
     if (parsed < min || parsed > max) {
-        errors.push(`${label || key} deve essere compreso tra ${min} e ${max}.`);
+        errors.push(`${label || key} must be between ${min} and ${max}.`);
         return fallback;
     }
     return parsed;
@@ -145,25 +145,25 @@ function readPositiveInt(env, key, { fallback, min = 1, max, errors, label }) {
 
 function validateServerPath(pathValue, errors) {
     if (!pathValue.startsWith("/")) {
-        errors.push("MCP_BB_PATH deve iniziare con '/'.");
+        errors.push("MCP_BB_PATH must start with '/'.");
     }
 }
 
 function validateAllowedList(list, key, errors) {
     if (!list.length) {
-        errors.push(`${key} deve contenere almeno un valore.`);
+        errors.push(`${key} must contain at least one value.`);
     }
 }
 
 function validateEmail(value, key, errors) {
     if (!value.includes("@")) {
-        errors.push(`${key} deve essere un indirizzo email valido.`);
+        errors.push(`${key} must be a valid email address.`);
     }
 }
 
 function validateInternalApiKey(value, key, errors) {
     if (value && value.length < 16) {
-        errors.push(`${key} deve essere lungo almeno 16 caratteri.`);
+        errors.push(`${key} must be at least 16 characters long.`);
     }
 }
 
@@ -171,7 +171,7 @@ function validateEnabledWriteTools(writeTools, errors) {
     for (const toolName of writeTools) {
         if (!WRITE_TOOL_NAMES.has(toolName)) {
             errors.push(
-                `MCP_BB_ENABLED_WRITE_TOOLS contiene '${toolName}', ma non e' un tool write supportato.`,
+                `MCP_BB_ENABLED_WRITE_TOOLS contains '${toolName}', which is not a supported write tool.`,
             );
         }
     }
@@ -180,7 +180,7 @@ function validateEnabledWriteTools(writeTools, errors) {
 function validateRepositoryPart(value, key, errors) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value)) {
         errors.push(
-            `${key} deve contenere solo lettere, numeri, _, - o . e iniziare con lettera o numero.`,
+            `${key} may only contain letters, digits, _, - or . and must start with a letter or digit.`,
         );
     }
 }
@@ -196,11 +196,11 @@ function parseRepositories(env, errors) {
         try {
             rawRepositories = JSON.parse(rawJson);
         } catch {
-            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere JSON valido.");
+            errors.push("BITBUCKET_REPOSITORIES_JSON must be valid JSON.");
             return { repositories: [], defaultRepositoryId: "" };
         }
         if (!Array.isArray(rawRepositories)) {
-            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere un array.");
+            errors.push("BITBUCKET_REPOSITORIES_JSON must be an array.");
             return { repositories: [], defaultRepositoryId: "" };
         }
     }
@@ -223,7 +223,7 @@ function parseRepositories(env, errors) {
     const ids = new Set();
     for (const [index, raw] of rawRepositories.entries()) {
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-            errors.push(`BITBUCKET_REPOSITORIES_JSON[${index}] deve essere un oggetto.`);
+            errors.push(`BITBUCKET_REPOSITORIES_JSON[${index}] must be an object.`);
             continue;
         }
         const id = String(raw.id || "").trim();
@@ -233,15 +233,17 @@ function parseRepositories(env, errors) {
             .trim()
             .toLowerCase();
         if (!id || !workspace || !repoSlug) {
-            errors.push(`BITBUCKET_REPOSITORIES_JSON[${index}] richiede id, workspace e repoSlug.`);
+            errors.push(
+                `BITBUCKET_REPOSITORIES_JSON[${index}] requires id, workspace and repoSlug.`,
+            );
             continue;
         }
         validateRepositoryPart(id, `repository id '${id}'`, errors);
         validateRepositoryPart(workspace, `workspace '${workspace}'`, errors);
         validateRepositoryPart(repoSlug, `repoSlug '${repoSlug}'`, errors);
-        if (ids.has(id)) errors.push(`Repository id duplicato: ${id}`);
+        if (ids.has(id)) errors.push(`Duplicate repository id: ${id}`);
         if (!new Set(["active", "disabled"]).has(status)) {
-            errors.push(`Repository '${id}' deve avere status active o disabled.`);
+            errors.push(`Repository '${id}' must have status active or disabled.`);
         }
         ids.add(id);
         const allowMerge = toBool(raw.allowMerge ?? raw.allow_merge, false);
@@ -269,7 +271,7 @@ function parseRepositories(env, errors) {
             (repository) => repository.id === defaultRepositoryId && repository.status === "active",
         )
     ) {
-        errors.push("BITBUCKET_DEFAULT_REPOSITORY deve indicare un repository attivo configurato.");
+        errors.push("BITBUCKET_DEFAULT_REPOSITORY must reference a configured active repository.");
     }
     return { repositories, defaultRepositoryId };
 }
@@ -282,20 +284,20 @@ export function getConfigFromEnv(env = process.env) {
         env,
         "BITBUCKET_USER_EMAIL",
         errors,
-        "BITBUCKET_USER_EMAIL e' obbligatorio.",
+        "BITBUCKET_USER_EMAIL is required.",
     );
     const apiToken = readRequiredTrimmed(
         env,
         "BITBUCKET_API_TOKEN",
         errors,
-        "BITBUCKET_API_TOKEN e' obbligatorio e deve essere fornito solo a runtime.",
+        "BITBUCKET_API_TOKEN is required and must only be provided at runtime.",
     );
     if (userEmail) {
         validateEmail(userEmail, "BITBUCKET_USER_EMAIL", errors);
     }
     if (!userEmail || !apiToken) {
         errors.push(
-            "BITBUCKET_USER_EMAIL va inserito nel .env o come env var; BITBUCKET_API_TOKEN va passato solo a runtime.",
+            "Set BITBUCKET_USER_EMAIL in .env or as an environment variable; pass BITBUCKET_API_TOKEN only at runtime.",
         );
     }
 
@@ -359,7 +361,7 @@ export function getConfigFromEnv(env = process.env) {
     const repositoryConfig = parseRepositories(env, errors);
 
     if (errors.length) {
-        throw new Error(`Configurazione non valida:\n- ${errors.join("\n- ")}`);
+        throw new Error(`Invalid configuration:\n- ${errors.join("\n- ")}`);
     }
 
     return {
