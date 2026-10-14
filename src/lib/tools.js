@@ -3,9 +3,8 @@ import { WRITE_TOOL_NAMES } from "./tool-policy.js";
 /**
  * Tool definitions exposed via MCP ListTools.
  *
- * NOTE: approve_pull_request and merge_pull_request
- * have handlers implemented but are NOT exposed here yet.
- * To enable them, add their definitions to the TOOLS array.
+ * NOTE: approve_pull_request has a handler implemented but is NOT exposed here yet.
+ * To enable it, add its definition to the TOOLS array.
  */
 
 export const TOOLS = [
@@ -208,6 +207,45 @@ export const TOOLS = [
             required: ["pipeline_ref"],
         },
     },
+    {
+        name: "list_pipeline_steps",
+        description:
+            "Elenca gli step di una pipeline Bitbucket con stato, risultato e durata, senza scaricare i log.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pipeline_ref: {
+                    type: "string",
+                    description:
+                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
+                },
+            },
+            required: ["pipeline_ref"],
+        },
+    },
+    {
+        name: "get_pipeline_step_log",
+        description:
+            "Legge il log testuale di uno step di pipeline (qualsiasi stato, non solo fallito), troncato in modo sicuro se troppo lungo.",
+        annotations: { readOnlyHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pipeline_ref: {
+                    type: "string",
+                    description:
+                        "UUID pipeline Bitbucket, con o senza parentesi graffe, oppure URL Bitbucket che lo contiene.",
+                },
+                step_uuid: {
+                    type: "string",
+                    description:
+                        "UUID dello step, con o senza parentesi graffe (da list_pipeline_steps).",
+                },
+            },
+            required: ["pipeline_ref", "step_uuid"],
+        },
+    },
 
     // ── PR write tools ───────────────────────────────────────────
     {
@@ -294,6 +332,68 @@ export const TOOLS = [
             required: ["title", "source_branch"],
         },
     },
+    {
+        name: "run_pipeline",
+        description:
+            "Avvia una pipeline Bitbucket su un branch. Senza pipeline_name esegue la pipeline predefinita del branch; con pipeline_name esegue la custom pipeline indicata.",
+        annotations: { readOnlyHint: false, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                branch: { type: "string", description: "Branch su cui avviare la pipeline." },
+                pipeline_name: {
+                    type: "string",
+                    description:
+                        "Nome della custom pipeline (sezione pipelines.custom di bitbucket-pipelines.yml). Omettere per la pipeline di default del branch.",
+                },
+                commit_hash: {
+                    type: "string",
+                    description:
+                        "Commit specifico (hash completo a 40 caratteri) su cui eseguire la pipeline. Default: HEAD del branch.",
+                },
+                variables: {
+                    type: "object",
+                    description:
+                        "Variabili pipeline in forma chiave -> valore, passate come variabili non segrete.",
+                    additionalProperties: { type: "string" },
+                },
+            },
+            required: ["branch"],
+        },
+    },
+    {
+        name: "merge_pull_request",
+        description:
+            "Merge di una pull request in due passi. Prima chiamata senza confirmation_token: restituisce il riepilogo della PR e un token. " +
+            "Chiedi SEMPRE conferma esplicita all'utente in chat mostrando il riepilogo; solo dopo la conferma richiama il tool con lo stesso pr_id e il confirmation_token. " +
+            "Disponibile solo per i repository con allowMerge attivo. Operazione irreversibile.",
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: { type: "integer", description: "ID della Pull Request." },
+                merge_strategy: {
+                    type: "string",
+                    enum: ["merge_commit", "squash", "fast_forward"],
+                    description: "Strategia di merge. Default: merge_commit.",
+                },
+                close_source_branch: {
+                    type: "boolean",
+                    description: "Chiudi il branch sorgente dopo il merge. Default: true.",
+                },
+                message: {
+                    type: "string",
+                    description: "Messaggio del commit di merge. Opzionale.",
+                },
+                confirmation_token: {
+                    type: "string",
+                    description:
+                        "Token ricevuto dalla prima chiamata. Passarlo solo dopo che l'utente ha confermato esplicitamente in chat.",
+                },
+            },
+            required: ["pr_id"],
+        },
+    },
 ];
 
 /*
@@ -310,21 +410,6 @@ export const TOOLS = [
  *         required: ["pr_id"]
  *     }
  * },
- * {
- *     name: "merge_pull_request",
- *     description: "Merge di una pull request. Operazione irreversibile.",
- *     annotations: { readOnlyHint: false, destructiveHint: true },
- *     inputSchema: {
- *         type: "object",
- *         properties: {
- *             pr_id: { type: "integer", description: "ID della Pull Request." },
- *             merge_strategy: { type: "string", enum: ["merge_commit","squash","fast_forward"], description: "Strategia merge. Default: merge_commit." },
- *             close_source_branch: { type: "boolean", description: "Chiudi branch. Default: true." },
- *             message: { type: "string", description: "Messaggio commit merge. Opzionale." }
- *         },
- *         required: ["pr_id"]
- *     }
- * }
  * {
  *     name: "bb_api",
  *     description:
@@ -366,11 +451,19 @@ const REPOSITORY_SELECTOR = {
 
 export const EXPOSED_TOOL_NAMES = new Set(TOOLS.map((tool) => tool.name));
 
-export function getEnabledTools(enabledWriteTools = WRITE_TOOL_NAMES) {
+export const MERGE_TOOL_NAME = "merge_pull_request";
+
+export function getEnabledTools(
+    enabledWriteTools = WRITE_TOOL_NAMES,
+    { mergeAvailable = true } = {},
+) {
     const allowedWriteTools = new Set(enabledWriteTools);
-    return TOOLS.filter(
-        (tool) => !WRITE_TOOL_NAMES.has(tool.name) || allowedWriteTools.has(tool.name),
-    ).map((tool) => ({
+    return TOOLS.filter((tool) => {
+        if (tool.name === MERGE_TOOL_NAME && !mergeAvailable) {
+            return false;
+        }
+        return !WRITE_TOOL_NAMES.has(tool.name) || allowedWriteTools.has(tool.name);
+    }).map((tool) => ({
         ...tool,
         inputSchema: {
             ...tool.inputSchema,
@@ -382,6 +475,6 @@ export function getEnabledTools(enabledWriteTools = WRITE_TOOL_NAMES) {
     }));
 }
 
-export function getEnabledToolNames(enabledWriteTools = WRITE_TOOL_NAMES) {
-    return new Set(getEnabledTools(enabledWriteTools).map((tool) => tool.name));
+export function getEnabledToolNames(enabledWriteTools = WRITE_TOOL_NAMES, options = {}) {
+    return new Set(getEnabledTools(enabledWriteTools, options).map((tool) => tool.name));
 }

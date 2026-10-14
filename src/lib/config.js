@@ -212,6 +212,7 @@ function parseRepositories(env, errors) {
                 repoSlug: legacyRepoSlug,
                 defaultDestinationBranch: legacyBranch,
                 status: "active",
+                allowMerge: toBool(readTrimmed(env, "BITBUCKET_ALLOW_MERGE"), false),
             },
         ];
     }
@@ -241,6 +242,7 @@ function parseRepositories(env, errors) {
             errors.push(`Repository '${id}' deve avere status active o disabled.`);
         }
         ids.add(id);
+        const allowMerge = toBool(raw.allowMerge ?? raw.allow_merge, false);
         repositories.push({
             id,
             displayName: String(raw.displayName || raw.display_name || id).trim() || id,
@@ -250,6 +252,7 @@ function parseRepositories(env, errors) {
                 raw.defaultDestinationBranch || raw.default_destination_branch || "",
             ).trim(),
             status,
+            allowMerge,
         });
     }
 

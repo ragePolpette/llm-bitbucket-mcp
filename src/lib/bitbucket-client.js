@@ -12,8 +12,9 @@ export class BitbucketApiError extends Error {
 
 const FRIENDLY_ERRORS = {
     401: "Auth failed. Verifica BITBUCKET_USER_EMAIL / BITBUCKET_API_TOKEN.",
-    403: "Permission denied. Verifica scope API Token (Repositories: Read, Pull requests: Read+Write).",
+    403: "Permission denied. Verifica scope API Token (Repositories: Read, Pull requests: Read+Write, Pipelines: Read/Write se usi i tool pipeline).",
     404: "Risorsa non trovata.",
+    406: "Not Acceptable. Bitbucket non serve la risorsa nel formato richiesto (header Accept).",
     429: "Rate limited da Bitbucket. Riprova tra qualche secondo.",
 };
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
@@ -202,7 +203,11 @@ export class BitbucketClient {
 
         const contentType = response.headers.get("content-type") || "";
         const isJson = contentType.includes("application/json");
-        const isText = contentType.includes("text/") || accept === "text/plain";
+        const wantsText = Boolean(accept) && !String(accept).includes("application/json");
+        const isText =
+            contentType.includes("text/") ||
+            contentType.includes("application/octet-stream") ||
+            wantsText;
 
         let responseBody;
         if (isText && !isJson) {

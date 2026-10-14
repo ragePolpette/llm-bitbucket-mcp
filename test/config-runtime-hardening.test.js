@@ -28,7 +28,29 @@ test("getConfigFromEnv applies safe runtime defaults", () => {
         "add_pull_request_comment",
         "create_pull_request",
         "open_pull_request",
+        "run_pipeline",
+        "merge_pull_request",
     ]);
+});
+
+test("getConfigFromEnv reads allowMerge per repository with a safe default", () => {
+    const config = getConfigFromEnv(
+        createValidEnv({
+            BITBUCKET_REPOSITORIES_JSON: JSON.stringify([
+                { id: "one", workspace: "workspace", repoSlug: "repo-one", allowMerge: true },
+                { id: "two", workspace: "workspace", repoSlug: "repo-two", allow_merge: "false" },
+                { id: "three", workspace: "workspace", repoSlug: "repo-three" },
+            ]),
+            BITBUCKET_DEFAULT_REPOSITORY: "one",
+        }),
+    );
+
+    assert.equal(config.bitbucket.repositories[0].allowMerge, true);
+    assert.equal(config.bitbucket.repositories[1].allowMerge, false);
+    assert.equal(config.bitbucket.repositories[2].allowMerge, false);
+
+    const legacy = getConfigFromEnv(createValidEnv());
+    assert.equal(legacy.bitbucket.repositories[0].allowMerge, false);
 });
 
 test("getConfigFromEnv parses multiple repositories and a default selector", () => {
@@ -81,7 +103,7 @@ test("getConfigFromEnv reports aggregated validation errors", () => {
                 MCP_BB_ALLOWED_HOSTS: "",
                 MCP_BB_ALLOWED_ORIGINS: "",
                 MCP_BB_INTERNAL_API_KEY: "short",
-                MCP_BB_ENABLED_WRITE_TOOLS: "merge_pull_request",
+                MCP_BB_ENABLED_WRITE_TOOLS: "delete_repository",
             }),
         /Configurazione non valida:/,
     );
