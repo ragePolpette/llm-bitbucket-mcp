@@ -199,11 +199,13 @@ function parseRepositories(env, errors) {
             errors.push("BITBUCKET_REPOSITORIES_JSON deve essere JSON valido.");
             return { repositories: [], defaultRepositoryId: "" };
         }
-        if (!Array.isArray(rawRepositories) || rawRepositories.length === 0) {
-            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere un array non vuoto.");
+        if (!Array.isArray(rawRepositories)) {
+            errors.push("BITBUCKET_REPOSITORIES_JSON deve essere un array.");
             return { repositories: [], defaultRepositoryId: "" };
         }
-    } else {
+    }
+    const useLegacyRepository = !rawJson || rawRepositories.length === 0;
+    if (useLegacyRepository) {
         rawRepositories = [
             {
                 id: "default",
@@ -259,7 +261,7 @@ function parseRepositories(env, errors) {
     const defaultRepositoryId = readTrimmed(
         env,
         "BITBUCKET_DEFAULT_REPOSITORY",
-        rawJson ? "" : "default",
+        useLegacyRepository ? "default" : "",
     );
     if (
         defaultRepositoryId &&

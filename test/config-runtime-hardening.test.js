@@ -74,6 +74,21 @@ test("getConfigFromEnv parses multiple repositories and a default selector", () 
     assert.equal(config.bitbucket.repositories[0].repoSlug, "repo-one");
 });
 
+test("getConfigFromEnv falls back to the legacy repository when the registry is empty", () => {
+    const config = getConfigFromEnv(
+        createValidEnv({
+            BITBUCKET_REPOSITORIES_JSON: "[]",
+            BITBUCKET_WORKSPACE: "legacy-ws",
+            BITBUCKET_REPO_SLUG: "legacy-repo",
+        }),
+    );
+
+    assert.equal(config.bitbucket.repositories.length, 1);
+    assert.equal(config.bitbucket.repositories[0].id, "default");
+    assert.equal(config.bitbucket.repositories[0].repoSlug, "legacy-repo");
+    assert.equal(config.bitbucket.defaultRepositoryId, "default");
+});
+
 test("getConfigFromEnv rejects duplicate repository ids", () => {
     assert.throws(
         () =>
