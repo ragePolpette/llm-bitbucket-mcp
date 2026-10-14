@@ -1,9 +1,4 @@
-function normalizeHeaderValue(rawValue) {
-    if (Array.isArray(rawValue)) {
-        return typeof rawValue[0] === "string" ? rawValue[0].trim() : "";
-    }
-    return typeof rawValue === "string" ? rawValue.trim() : "";
-}
+import { normalizeHeaderValue } from "./runtime-policy.js";
 
 export function applyJsonAcceptCompatibility(headers, { sseEnabled }) {
     if (sseEnabled) {

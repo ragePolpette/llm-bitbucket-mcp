@@ -15,7 +15,7 @@
         "lint": "eslint .",
         "release:check": "npm run check",
         "start": "node src/server.js",
-        "test": "node --import ./scripts/test-env.js --test"
+        "test": "node --import ./scripts/test-env.js --test --experimental-test-coverage"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.0"

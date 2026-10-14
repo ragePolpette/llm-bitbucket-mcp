@@ -100,7 +100,7 @@ test("getConfigFromEnv rejects duplicate repository ids", () => {
                     ]),
                 }),
             ),
-        /Repository id duplicato/,
+        /Duplicate repository id/,
     );
 });
 
@@ -120,7 +120,7 @@ test("getConfigFromEnv reports aggregated validation errors", () => {
                 MCP_BB_INTERNAL_API_KEY: "short",
                 MCP_BB_ENABLED_WRITE_TOOLS: "delete_repository",
             }),
-        /Configurazione non valida:/,
+        /Invalid configuration:/,
     );
 });
 
@@ -168,4 +168,20 @@ test("health payload is minimal and runtime-oriented", () => {
         uptimeSec: 42,
         activeSessions: 3,
     });
+});
+
+test("session reservations hold capacity until committed or released", () => {
+    const sessions = createSessionStore({ ttlMs: 60_000, maxSessions: 1 });
+    const reservation = sessions.reserve();
+
+    assert.throws(() => sessions.reserve(), SessionStoreCapacityError);
+    assert.throws(() => sessions.set("other", {}), SessionStoreCapacityError);
+
+    reservation.release();
+    reservation.release();
+    const second = sessions.reserve();
+    second.commit("one", { id: "transport" });
+    assert.deepEqual(sessions.get("one"), { id: "transport" });
+    assert.throws(() => second.commit("two", {}), /already used/);
+    assert.throws(() => sessions.reserve(), SessionStoreCapacityError);
 });

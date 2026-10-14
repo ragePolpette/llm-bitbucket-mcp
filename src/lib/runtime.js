@@ -113,7 +113,7 @@ export async function runServerMain(options = {}) {
     try {
         await startServer(options);
     } catch (error) {
-        const message = error instanceof Error ? error.message : "Errore di startup sconosciuto.";
+        const message = error instanceof Error ? error.message : "Unknown startup error.";
         logger.logError("startup_error", error);
         console.error(`Failed to start llm-bitbucket-mcp: ${message}`);
         process.exit(1);

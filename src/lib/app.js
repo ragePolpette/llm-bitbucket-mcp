@@ -11,7 +11,7 @@ import { EXPOSED_TOOL_NAMES } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
 import * as logger from "./logger.js";
 import { applyJsonAcceptCompatibility } from "./accept-compat.js";
-import { buildHealthPayload } from "./health.js";
+import { buildHealthPayload, buildPublicHealthPayload } from "./health.js";
 import {
     CORS_ALLOWED_HEADERS,
     CORS_ALLOWED_METHODS,
@@ -29,6 +29,7 @@ import {
 } from "./runtime-policy.js";
 import { WRITE_TOOL_NAMES } from "./tool-policy.js";
 import { getEnabledToolNames, getEnabledTools } from "./tools.js";
+import { SessionStoreCapacityError } from "./session-store.js";
 
 function asTextResult(payload) {
     return {
@@ -47,7 +48,7 @@ function createMcpServer(repositories, config, metrics) {
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: enabledTools }));
 
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         const { name, arguments: args } = request.params;
         const isWriteTool = WRITE_TOOL_NAMES.has(name);
         try {
@@ -55,7 +56,7 @@ function createMcpServer(repositories, config, metrics) {
                 if (isWriteTool) {
                     logger.logWarn("write_tool_blocked", { tool: name });
                 }
-                throw new Error(`Tool non esposto dal surface MCP corrente: ${name}`);
+                throw new Error(`Tool is not exposed by the current MCP surface: ${name}`);
             }
             const repository = repositories.resolve(args?.repository_id);
             const result = await handleToolCall(name, args || {}, repository.client, {
@@ -64,6 +65,9 @@ function createMcpServer(repositories, config, metrics) {
                 selectedRepositoryId: repository.id,
                 selectedRepository: repositories.describe(repository),
                 defaultRepositoryId: repositories.defaultRepositoryId,
+                enabledToolNames,
+                sessionId: extra?.sessionId || "",
+                signal: extra?.signal,
             });
             metrics?.recordToolCall(name, "success");
             if (isWriteTool) {
@@ -121,12 +125,20 @@ function withOriginValidation(req, res, next, config) {
 
 function withApiKeyAuth(req, res, next, config) {
     if (!config.security.authEnabled || req.method === "OPTIONS") {
+        req.authenticated = true;
         next();
         return;
     }
 
     const providedApiKey = extractApiKey(req.headers);
     if (safeEqualSecret(config.security.internalApiKey, providedApiKey)) {
+        req.authenticated = true;
+        next();
+        return;
+    }
+
+    if (req.method === "GET" && req.path === HEALTH_ENDPOINT) {
+        req.authenticated = false;
         next();
         return;
     }
@@ -212,13 +224,18 @@ export function createApp(config, sessions, repositories, metrics) {
     });
     app.options(config.server.path, (_req, res) => sendCorsPreflight(res));
 
-    app.get(HEALTH_ENDPOINT, (_req, res) => {
+    app.get(HEALTH_ENDPOINT, (req, res) => {
         logger.logInfo("health_check");
+        const uptimeSec = Math.floor(process.uptime());
+        if (!req.authenticated) {
+            res.json(buildPublicHealthPayload({ uptimeSec }));
+            return;
+        }
         res.json(
             buildHealthPayload({
                 endpoint: config.server.path,
                 sessions,
-                uptimeSec: Math.floor(process.uptime()),
+                uptimeSec,
             }),
         );
     });
@@ -257,19 +274,38 @@ export function createApp(config, sessions, repositories, metrics) {
             }
 
             if (!sessionId && isInitializeRequest(req.body)) {
-                logger.logInfo("session_initialize");
-                const server = createMcpServer(repositories, config, metrics);
-                transport = new StreamableHTTPServerTransport({
-                    sessionIdGenerator: () => randomUUID(),
-                    enableJsonResponse: !config.server.sseEnabled,
-                    onsessioninitialized: (sid) => sessions.set(sid, transport),
-                });
-                transport.onclose = () => {
-                    const sid = transport.sessionId;
-                    if (sid) sessions.delete(sid);
-                };
-                await server.connect(transport);
-                await transport.handleRequest(req, res, req.body);
+                let reservation;
+                try {
+                    reservation = sessions.reserve();
+                } catch (error) {
+                    if (error instanceof SessionStoreCapacityError) {
+                        logger.logWarn("session_capacity_reached", {
+                            max_sessions: sessions.maxSessions(),
+                        });
+                        res.status(503)
+                            .set("Retry-After", "30")
+                            .json(createErrorResponse(`Service Unavailable: ${error.message}`));
+                        return;
+                    }
+                    throw error;
+                }
+                try {
+                    logger.logInfo("session_initialize");
+                    const server = createMcpServer(repositories, config, metrics);
+                    transport = new StreamableHTTPServerTransport({
+                        sessionIdGenerator: () => randomUUID(),
+                        enableJsonResponse: !config.server.sseEnabled,
+                        onsessioninitialized: (sid) => reservation.commit(sid, transport),
+                    });
+                    transport.onclose = () => {
+                        const sid = transport.sessionId;
+                        if (sid) sessions.delete(sid);
+                    };
+                    await server.connect(transport);
+                    await transport.handleRequest(req, res, req.body);
+                } finally {
+                    reservation.release();
+                }
                 return;
             }
 

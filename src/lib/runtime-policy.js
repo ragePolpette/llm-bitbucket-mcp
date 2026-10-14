@@ -1,7 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const PACKAGE_JSON = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+);
 
 export const SERVER_NAME = "llm-bitbucket-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = String(PACKAGE_JSON.version || "0.0.0");
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_PATH = "/mcp";
 export const HEALTH_ENDPOINT = "/health";
@@ -28,6 +33,7 @@ export const MAX_RETRY_MAX_ATTEMPTS = 5;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 250;
 export const MIN_RETRY_BASE_DELAY_MS = 50;
 export const MAX_RETRY_BASE_DELAY_MS = 5_000;
+export const MAX_RETRY_DELAY_MS = MAX_RETRY_BASE_DELAY_MS * 8;
 
 export function normalizeHeaderValue(rawValue) {
     if (Array.isArray(rawValue)) {
@@ -103,10 +109,7 @@ export function safeEqualSecret(expected, received) {
     if (!expected || !received) {
         return false;
     }
-    const expectedBuffer = Buffer.from(expected);
-    const receivedBuffer = Buffer.from(received);
-    if (expectedBuffer.length !== receivedBuffer.length) {
-        return false;
-    }
-    return timingSafeEqual(expectedBuffer, receivedBuffer);
+    const expectedDigest = createHash("sha256").update(String(expected), "utf8").digest();
+    const receivedDigest = createHash("sha256").update(String(received), "utf8").digest();
+    return timingSafeEqual(expectedDigest, receivedDigest);
 }

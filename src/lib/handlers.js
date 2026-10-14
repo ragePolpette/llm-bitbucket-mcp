@@ -1,7 +1,13 @@
 import * as logger from "./logger.js";
-import { isRepoScopedBitbucketApiPath, normalizeBitbucketApiPath } from "./bitbucket-client.js";
+import {
+    isRepoScopedBitbucketApiPath,
+    normalizeBitbucketApiPath,
+    truncateUtf8,
+} from "./bitbucket-client.js";
 import { ALLOWED_PR_STATES, MERGE_STRATEGIES, TOOL_LIMITS } from "./tool-policy.js";
 import { createConfirmationStore } from "./merge-confirmations.js";
+import { SERVER_NAME } from "./runtime-policy.js";
+import { buildToolMap } from "./tools.js";
 
 const PIPELINE_LOG_ACCEPT = "application/octet-stream, text/plain;q=0.9, */*;q=0.8";
 
@@ -35,6 +41,8 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleGetPullRequestPipelineFailureOutput(args, client);
         case "get_pipeline_run":
             return handleGetPipelineRun(args, client);
+        case "wait_for_pipeline":
+            return handleWaitForPipeline(args, client, policy);
         case "get_pipeline_failure_output":
             return handleGetPipelineFailureOutput(args, client);
         case "list_pipeline_steps":
@@ -43,6 +51,16 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleGetPipelineStepLog(args, client);
         case "add_pull_request_comment":
             return handleAddPRComment(args, client);
+        case "reply_to_pull_request_comment":
+            return handleReplyToPRComment(args, client);
+        case "create_pull_request_task":
+            return handleCreatePRTask(args, client);
+        case "resolve_pull_request_task":
+            return handleResolvePRTask(args, client);
+        case "approve_pull_request":
+            return handleApprovePR(args, client);
+        case "unapprove_pull_request":
+            return handleUnapprovePR(args, client);
         case "create_pull_request":
             return handleCreatePR(args, client);
         case "open_pull_request":
@@ -51,72 +69,60 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleRunPipeline(args, client);
         case "merge_pull_request":
             return handleMergePR(args, client, policy);
+        case "decline_pull_request":
+            return handleDeclinePR(args, client, policy);
         case "bb_api":
             return handleGenericApi(args, client);
         default:
-            throw new Error(`Tool non supportato: ${name}`);
+            throw new Error(`Unsupported tool: ${name}`);
     }
 }
 
 function handleBitbucketInfo(client, policy) {
     return {
-        server: "llm-bitbucket-mcp",
-        purpose: "Bitbucket Cloud MCP focalizzato su PR e read API repository-scoped.",
-        tool_map: {
-            discovery: [
-                "bitbucket_info",
-                "list_pull_requests",
-                "find_open_pull_request",
-                "get_pull_request",
-                "get_pull_request_diff",
-                "get_pull_request_comments",
-                "get_pull_request_commits",
-                "get_pull_request_statuses",
-                "get_pull_request_tasks",
-                "get_pull_request_pipelines",
-                "get_pull_request_pipeline_failure_output",
-                "get_pipeline_run",
-                "get_pipeline_failure_output",
-                "list_pipeline_steps",
-                "get_pipeline_step_log",
-            ],
-            pr_write: [
-                "create_pull_request",
-                "open_pull_request",
-                "add_pull_request_comment",
-                "merge_pull_request",
-            ],
-            pipeline_write: ["run_pipeline"],
-            utility: [],
-        },
+        server: SERVER_NAME,
+        purpose:
+            "Bitbucket Cloud MCP server focused on pull requests, pipelines and repository-scoped read APIs.",
+        tool_map: buildToolMap(policy.enabledToolNames),
         usage_notes: {
-            find_open_pull_request:
-                "Usa source_branch esatto; destination_branch e' opzionale ma consigliato per evitare ambiguita.",
+            find_open_pull_request: `Use the exact source_branch; destination_branch is optional but recommended to avoid ambiguity. Scans at most ${TOOL_LIMITS.findOpenPullRequestPages} pages and reports truncated: true when it stopped early.`,
             create_pull_request:
-                "Richiede title e source_branch. destination_branch puo' arrivare dal payload oppure da BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
-            open_pull_request: "Alias ergonomico di create_pull_request con lo stesso contract.",
+                "Requires title and source_branch. destination_branch comes from the payload or from the repository default destination branch.",
+            open_pull_request: "Ergonomic alias of create_pull_request with the same contract.",
             get_pull_request_commits:
-                "Espone solo i commit effettivamente inclusi nella PR, con un cap locale di 500 elementi.",
+                "Returns only the commits included in the pull request, capped locally at 500 items.",
             get_pull_request_statuses:
-                "Restituisce gli status Bitbucket associati alla PR, utile per build e check summary.",
+                "Returns the Bitbucket statuses attached to the pull request, useful for build and check summaries.",
             get_pull_request_tasks:
-                "Restituisce i task della PR con stato e contenuto raw, utile per follow-up review.",
+                "Returns the pull request tasks with state and raw content, useful for review follow-up.",
             get_pull_request_pipelines:
-                "Risalendo da pr_id usa prima gli status della PR per correlare i build pipeline reali; se non basta, fa fallback sul commit o sulla branch sorgente.",
+                "Starting from pr_id, uses the pull request statuses first to correlate the real pipeline builds; falls back to the commit or the source branch.",
             get_pull_request_pipeline_failure_output:
-                "Per una PR recupera i run falliti correlati tramite status/build Bitbucket e ne aggrega i log degli step in errore.",
+                "For a pull request, finds the failed runs correlated through Bitbucket statuses and aggregates the logs of the failed steps.",
             get_pipeline_run:
-                "Accetta pipeline UUID o URL Bitbucket e restituisce lo stato sintetico della pipeline.",
+                "Accepts a pipeline UUID or Bitbucket URL and returns the pipeline summary.",
+            wait_for_pipeline:
+                "Polls a pipeline until it completes or pauses, or until timeout_seconds (max 600) elapses. Check timed_out in the result.",
             get_pipeline_failure_output:
-                "Legge gli step falliti di una pipeline e ne recupera il log testuale troncato in modo sicuro.",
+                "Reads the failed steps of a pipeline and returns their text logs, safely truncated.",
             list_pipeline_steps:
-                "Elenca gli step di una pipeline con stato e risultato; usa gli uuid restituiti con get_pipeline_step_log.",
+                "Lists the steps of a pipeline with state and result; use the returned uuids with get_pipeline_step_log.",
             get_pipeline_step_log:
-                "Legge il log di un singolo step, anche se riuscito o ancora in corso, troncato in modo sicuro.",
+                "Reads the log of a single step, even if successful or still running, safely truncated.",
             run_pipeline:
-                "Avvia la pipeline di default del branch oppure una custom pipeline per nome; restituisce uuid e build number del run creato.",
+                "Starts the default pipeline of the branch or a custom pipeline by name; returns uuid and build number of the created run.",
+            reply_to_pull_request_comment:
+                "Replies to an existing comment; use the comment id from get_pull_request_comments as parent_id.",
+            create_pull_request_task:
+                "Creates a task on the pull request, optionally attached to a comment via comment_id.",
+            resolve_pull_request_task:
+                "Marks a task as resolved; use the id from get_pull_request_tasks.",
+            approve_pull_request: "Approves the pull request as the authenticated Bitbucket user.",
+            unapprove_pull_request: "Removes the approval of the authenticated Bitbucket user.",
             merge_pull_request:
-                "Due passi: la prima chiamata restituisce riepilogo e confirmation_token; chiedi conferma esplicita all'utente in chat, poi richiama con il token. Disponibile solo se il repository ha allowMerge attivo.",
+                "Two steps: the first call returns a summary and a confirmation_token; ask the user for explicit confirmation in chat, then call again with the token. Only available when the repository has allowMerge enabled.",
+            decline_pull_request:
+                "Two steps, like merge_pull_request: summary and confirmation_token first, then the confirmed call. Only available when the repository has allowMerge enabled.",
         },
         runtime_options: {
             auth_enabled: Boolean(policy.authEnabled),
@@ -127,11 +133,11 @@ function handleBitbucketInfo(client, policy) {
             repositories: policy.repositories || [],
         },
         boundaries: [
-            "Gestisce solo operazioni Bitbucket remote sul repository configurato.",
-            "Non espone clone, checkout_branch o create_commit del workspace locale.",
-            "I tool write esposti possono essere limitati via configurazione runtime.",
-            "bb_api resta implementato per uso interno ma non e' esposto nel catalogo MCP pubblico.",
-            "Per git locale usare l'harness o un MCP git dedicato.",
+            "Only performs remote Bitbucket operations on the configured repositories.",
+            "Does not expose clone, checkout_branch or create_commit on the local workspace.",
+            "Exposed write tools can be restricted through runtime configuration.",
+            "bb_api stays implemented for internal use but is not exposed in the public MCP catalog.",
+            "Use the harness or a dedicated git MCP server for local git.",
         ],
     };
 }
@@ -141,6 +147,9 @@ function handleBitbucketInfo(client, policy) {
 async function handleListPRs(args, client) {
     validateOptionalEnum(args.state, "state", ALLOWED_PR_STATES);
     validateOptionalString(args.source_branch, "source_branch", {
+        maxLength: TOOL_LIMITS.branchNameLength,
+    });
+    validateOptionalString(args.destination_branch, "destination_branch", {
         maxLength: TOOL_LIMITS.branchNameLength,
     });
     validateOptionalInteger(args.page, "page", { min: 1 });
@@ -169,19 +178,19 @@ async function handleFindOpenPR(args, client) {
     };
 
     let page = 1;
-    while (true) {
+    for (let scanned = 1; scanned <= TOOL_LIMITS.findOpenPullRequestPages; scanned += 1) {
         const result = await listPullRequests({ ...queryArgs, page }, client);
         const match = (result.values || []).find((pr) => isExactOpenMatch(pr, args));
         if (match) {
-            return { pull_request: mapPrSummary(match) };
+            return { pull_request: mapPrSummary(match), truncated: false };
         }
         if (!result.next) {
-            return { pull_request: null };
+            return { pull_request: null, truncated: false };
         }
-        const nextUrl = new URL(result.next);
-        const nextPage = Number(nextUrl.searchParams.get("page"));
-        page = Number.isFinite(nextPage) && nextPage > 0 ? nextPage : page + 1;
+        const nextPage = Number(new URL(result.next).searchParams.get("page"));
+        page = Number.isInteger(nextPage) && nextPage > page ? nextPage : page + 1;
     }
+    return { pull_request: null, truncated: true };
 }
 
 async function handleGetPR(args, client) {
@@ -230,16 +239,17 @@ async function handleGetPRDiff(args, client) {
         success: true,
     });
 
-    const maxBytes = 500 * 1024;
+    const maxBytes = TOOL_LIMITS.pullRequestDiffBytes;
     const diffText = typeof text === "string" ? text : JSON.stringify(text);
-    if (diffText.length > maxBytes) {
+    const { text: diff, truncated } = truncateUtf8(diffText, maxBytes);
+    if (truncated) {
         return {
-            diff: diffText.slice(0, maxBytes),
+            diff,
             truncated: true,
-            warning: `Diff troncato a ${maxBytes} bytes.`,
+            warning: `Diff truncated to ${maxBytes} bytes.`,
         };
     }
-    return { diff: diffText, truncated: false };
+    return { diff, truncated: false };
 }
 
 async function handleGetPRComments(args, client) {
@@ -334,7 +344,7 @@ async function handleGetPullRequestPipelineFailureOutput(args, client) {
     );
 
     const related = await fetchPullRequestPipelines(args.pr_id, client);
-    const failedPipelines = related._rawPipelines.filter(isFailedPipelineRun);
+    const failedPipelines = related._rawPipelines.filter(hasFailedState);
     const failures = [];
 
     for (const pipeline of failedPipelines) {
@@ -375,6 +385,90 @@ async function handleGetPipelineRun(args, client) {
     });
 
     return { pipeline: mapPipelineSummary(pipeline) };
+}
+
+const PIPELINE_TERMINAL_STATES = new Set(["COMPLETED"]);
+const PIPELINE_PAUSED_STATES = new Set(["PAUSED", "HALTED"]);
+
+function defaultSleep(delayMs, signal) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(done, delayMs);
+        function done() {
+            clearTimeout(timer);
+            signal?.removeEventListener?.("abort", done);
+            resolve();
+        }
+        signal?.addEventListener?.("abort", done, { once: true });
+    });
+}
+
+function describePipelineProgress(pipeline) {
+    const state = String(pipeline?.state?.name || "").toUpperCase();
+    const stage = String(pipeline?.state?.stage?.name || "").toUpperCase();
+    return {
+        completed: PIPELINE_TERMINAL_STATES.has(state),
+        paused: PIPELINE_PAUSED_STATES.has(state) || PIPELINE_PAUSED_STATES.has(stage),
+    };
+}
+
+async function handleWaitForPipeline(args, client, policy = {}) {
+    const pipelineUuid = requirePipelineUuid(args.pipeline_ref);
+    const timeoutSeconds =
+        validateOptionalInteger(args.timeout_seconds, "timeout_seconds", {
+            min: 1,
+            max: TOOL_LIMITS.pipelineWaitMaxSeconds,
+        }) ?? TOOL_LIMITS.pipelineWaitDefaultSeconds;
+    const pollIntervalSeconds =
+        validateOptionalInteger(args.poll_interval_seconds, "poll_interval_seconds", {
+            min: TOOL_LIMITS.pipelinePollMinSeconds,
+            max: TOOL_LIMITS.pipelinePollMaxSeconds,
+        }) ?? TOOL_LIMITS.pipelinePollDefaultSeconds;
+    const sleep = policy.sleep || defaultSleep;
+    const now = policy.now || (() => Date.now());
+    const signal = policy.signal;
+    const path = client.repoPath(`pipelines/${pipelineUuid}`);
+    const startedAt = now();
+    const deadline = startedAt + timeoutSeconds * 1000;
+    const maxPolls = Math.ceil(timeoutSeconds / pollIntervalSeconds) + 1;
+
+    logger.logApiCall("GET", `pipelines/${pipelineUuid}`, "wait_for_pipeline", "in", {
+        timeout_seconds: timeoutSeconds,
+        poll_interval_seconds: pollIntervalSeconds,
+    });
+
+    let pipeline = null;
+    let polls = 0;
+    let progress = { completed: false, paused: false };
+    while (polls < maxPolls) {
+        pipeline = await client.request("GET", path);
+        polls += 1;
+        progress = describePipelineProgress(pipeline);
+        const remainingMs = deadline - now();
+        if (progress.completed || progress.paused || remainingMs <= 0 || signal?.aborted) {
+            break;
+        }
+        await sleep(Math.min(pollIntervalSeconds * 1000, remainingMs), signal);
+        if (signal?.aborted) {
+            break;
+        }
+    }
+
+    const timedOut = !progress.completed && !progress.paused;
+    logger.logApiCall("GET", `pipelines/${pipelineUuid}`, "wait_for_pipeline", "out", {
+        success: true,
+        polls,
+        timed_out: timedOut,
+    });
+
+    return {
+        pipeline: mapPipelineSummary(pipeline),
+        completed: progress.completed,
+        paused: progress.paused,
+        timed_out: timedOut,
+        cancelled: Boolean(signal?.aborted),
+        polls,
+        waited_seconds: Math.max(0, Math.round((now() - startedAt) / 1000)),
+    };
 }
 
 async function handleGetPipelineFailureOutput(args, client) {
@@ -438,7 +532,7 @@ async function handleListPipelineSteps(args, client) {
 async function handleGetPipelineStepLog(args, client) {
     const pipelineUuid = requirePipelineUuid(args.pipeline_ref);
     if (args.step_uuid === undefined || args.step_uuid === null || args.step_uuid === "") {
-        throw new Error("Parametro obbligatorio mancante: step_uuid");
+        throw new Error("Missing required parameter: step_uuid");
     }
     const stepUuid = normalizeBitbucketUuid(args.step_uuid, "step_uuid");
     const path = `pipelines/${pipelineUuid}/steps/${stepUuid}/log`;
@@ -449,7 +543,7 @@ async function handleGetPipelineStepLog(args, client) {
         client.repoPath(`pipelines/${pipelineUuid}/steps/${stepUuid}`),
     );
     const logText = await readStepLogText(pipelineUuid, stepUuid, client);
-    const { text, truncated } = truncateText(logText, TOOL_LIMITS.pipelineLogBytes);
+    const { text, truncated } = truncateUtf8(logText, TOOL_LIMITS.pipelineLogBytes);
     logger.logApiCall("GET", path, "get_pipeline_step_log", "out", {
         success: true,
         truncated,
@@ -472,7 +566,7 @@ async function handleRunPipeline(args, client) {
     });
     const commitHash = validateOptionalString(args.commit_hash, "commit_hash", { maxLength: 40 });
     if (commitHash && !/^[0-9a-f]{40}$/i.test(commitHash)) {
-        throw new Error("commit_hash deve essere un hash completo di 40 caratteri esadecimali.");
+        throw new Error("commit_hash must be a full 40 character hexadecimal hash.");
     }
     const variables = validatePipelineVariables(args.variables);
 
@@ -514,12 +608,12 @@ async function handleRunPipeline(args, client) {
 function validatePipelineVariables(raw) {
     if (raw === undefined || raw === null) return [];
     if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new Error("variables deve essere un oggetto chiave -> valore.");
+        throw new Error("variables must be a key -> value object.");
     }
     const entries = Object.entries(raw);
     if (entries.length > TOOL_LIMITS.pipelineVariables) {
         throw new Error(
-            `variables supera il massimo consentito (${TOOL_LIMITS.pipelineVariables}).`,
+            `variables exceeds the maximum allowed (${TOOL_LIMITS.pipelineVariables}).`,
         );
     }
     return entries.map(([key, value]) => {
@@ -527,14 +621,14 @@ function validatePipelineVariables(raw) {
             maxLength: TOOL_LIMITS.pipelineVariableKeyLength,
         });
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-            throw new Error(`Nome variabile pipeline non valido: ${name}`);
+            throw new Error(`Invalid pipeline variable name: ${name}`);
         }
         if (typeof value !== "string") {
-            throw new Error(`variables.${name} deve essere una stringa.`);
+            throw new Error(`variables.${name} must be a string.`);
         }
         if (value.length > TOOL_LIMITS.pipelineVariableValueLength) {
             throw new Error(
-                `variables.${name} supera la lunghezza massima consentita (${TOOL_LIMITS.pipelineVariableValueLength}).`,
+                `variables.${name} exceeds the maximum allowed length (${TOOL_LIMITS.pipelineVariableValueLength}).`,
             );
         }
         return { key: name, value, secured: false };
@@ -597,15 +691,15 @@ async function handleCreatePR(args, client) {
     ).trim();
     if (!destinationBranch) {
         throw new Error(
-            "Parametro obbligatorio mancante: destination_branch. " +
-                "Passalo esplicitamente oppure configura BITBUCKET_DEFAULT_DESTINATION_BRANCH.",
+            "Missing required parameter: destination_branch. " +
+                "Pass it explicitly or configure a default destination branch for the repository.",
         );
     }
     validateString(destinationBranch, "destination_branch", {
         maxLength: TOOL_LIMITS.branchNameLength,
     });
     if (destinationBranch === args.source_branch) {
-        throw new Error("source_branch e destination_branch non possono coincidere.");
+        throw new Error("source_branch and destination_branch must differ.");
     }
 
     const body = {
@@ -633,35 +727,151 @@ async function handleCreatePR(args, client) {
     };
 }
 
-async function handleApprovePR(args, client) {
-    requirePositiveIntegerParam(args, "pr_id");
+async function handleReplyToPRComment(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+    const parentId = requirePositiveIntegerParam(args, "parent_id");
+    requireStringParam(args, "content", { maxLength: TOOL_LIMITS.commentLength });
 
-    logger.logApiCall(
-        "POST",
-        `pullrequests/${args.pr_id}/approve`,
-        "approve_pull_request",
-        "in",
-        {},
-    );
-    const result = await client.request(
-        "POST",
-        client.repoPath(`pullrequests/${args.pr_id}/approve`),
-    );
-    logger.logApiCall("POST", `pullrequests/${args.pr_id}/approve`, "approve_pull_request", "out", {
+    const path = `pullrequests/${prId}/comments`;
+    logger.logApiCall("POST", path, "reply_to_pull_request_comment", "in", {
+        parent_id: parentId,
+        content_length: String(args.content.length),
+    });
+    const result = await client.request("POST", client.repoPath(path), {
+        body: { content: { raw: args.content }, parent: { id: parentId } },
+    });
+    logger.logApiCall("POST", path, "reply_to_pull_request_comment", "out", {
         success: true,
+        entry_id: result.id,
     });
 
-    return { approved: true, user: result.user?.display_name };
+    return {
+        success: true,
+        comment_id: result.id,
+        parent_id: result.parent?.id ?? parentId,
+        link: result.links?.html?.href,
+    };
+}
+
+async function handleCreatePRTask(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+    requireStringParam(args, "content", { maxLength: TOOL_LIMITS.taskLength });
+    const commentId = validateOptionalInteger(args.comment_id, "comment_id", { min: 1 });
+
+    const body = { content: { raw: args.content } };
+    if (commentId) body.comment = { id: commentId };
+
+    const path = `pullrequests/${prId}/tasks`;
+    logger.logApiCall("POST", path, "create_pull_request_task", "in", {
+        comment_id: commentId,
+    });
+    const result = await client.request("POST", client.repoPath(path), { body });
+    logger.logApiCall("POST", path, "create_pull_request_task", "out", {
+        success: true,
+        entry_id: result.id,
+    });
+
+    return { success: true, task: mapPrTask(result) };
+}
+
+async function handleResolvePRTask(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+    const taskId = requirePositiveIntegerParam(args, "task_id");
+
+    const path = `pullrequests/${prId}/tasks/${taskId}`;
+    logger.logApiCall("PUT", path, "resolve_pull_request_task", "in", {});
+    const result = await client.request("PUT", client.repoPath(path), {
+        body: { state: "RESOLVED" },
+    });
+    logger.logApiCall("PUT", path, "resolve_pull_request_task", "out", { success: true });
+
+    return { success: true, task: mapPrTask(result) };
+}
+
+async function handleApprovePR(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+
+    const path = `pullrequests/${prId}/approve`;
+    logger.logApiCall("POST", path, "approve_pull_request", "in", {});
+    const result = await client.request("POST", client.repoPath(path));
+    logger.logApiCall("POST", path, "approve_pull_request", "out", { success: true });
+
+    return { approved: true, pr_id: prId, user: result.user?.display_name || null };
+}
+
+async function handleUnapprovePR(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+
+    const path = `pullrequests/${prId}/approve`;
+    logger.logApiCall("DELETE", path, "unapprove_pull_request", "in", {});
+    await client.request("DELETE", client.repoPath(path));
+    logger.logApiCall("DELETE", path, "unapprove_pull_request", "out", { success: true });
+
+    return { approved: false, pr_id: prId };
+}
+
+function requireAllowMerge(policy, action) {
+    const repository = policy.selectedRepository || {};
+    if (repository.allowMerge !== true) {
+        throw new Error(
+            `${action} is not allowed for repository '${repository.id || policy.selectedRepositoryId || "?"}': enable allowMerge in the repository configuration.`,
+        );
+    }
+    return repository.id || policy.selectedRepositoryId || "";
+}
+
+function confirmationOwner(policy) {
+    return { owner: String(policy.sessionId || "") };
+}
+
+async function fetchOpenPullRequestForConfirmation(prId, client, tool) {
+    logger.logApiCall("GET", `pullrequests/${prId}`, tool, "in", { phase: "preview" });
+    const pr = await client.request("GET", client.repoPath(`pullrequests/${prId}`));
+    const state = String(pr.state || "").toUpperCase();
+    if (state && state !== "OPEN") {
+        throw new Error(`Pull request ${prId} is not open (state: ${state}).`);
+    }
+    return pr;
+}
+
+function summarizePullRequestForConfirmation(pr, repositoryId) {
+    return {
+        repository_id: repositoryId,
+        pr_id: pr.id,
+        title: pr.title,
+        author: pr.author?.display_name || null,
+        source_branch: pr.source?.branch?.name || null,
+        destination_branch: pr.destination?.branch?.name || null,
+        state: pr.state || null,
+        approvals: (pr.participants || []).filter((p) => p.approved).length,
+        comment_count: pr.comment_count ?? null,
+        task_count: pr.task_count ?? null,
+        link: pr.links?.html?.href || null,
+    };
+}
+
+function consumeConfirmationOrThrow(tool, token, scope, policy) {
+    const consumed = mergeConfirmations.consume(token, scope, confirmationOwner(policy));
+    if (consumed.ok) {
+        return;
+    }
+    logger.logAudit(`${scope.action}_confirmation_rejected`, {
+        repository_id: scope.repositoryId,
+        pr_id: scope.prId,
+        reason: consumed.reason,
+    });
+    const reasonText =
+        consumed.reason === "scope_mismatch"
+            ? "the parameters do not match the confirmed summary"
+            : "unknown, expired or already used token";
+    throw new Error(
+        `Invalid confirmation_token (${reasonText}). Call ${tool} without a token to get a new summary and ask the user to confirm again.`,
+    );
 }
 
 async function handleMergePR(args, client, policy = {}) {
     const prId = requirePositiveIntegerParam(args, "pr_id");
-    const repository = policy.selectedRepository || {};
-    if (repository.allowMerge !== true) {
-        throw new Error(
-            `Merge non consentito per il repository '${repository.id || policy.selectedRepositoryId || "?"}': abilita allowMerge nella configurazione del repository.`,
-        );
-    }
+    const repositoryId = requireAllowMerge(policy, "Merge");
 
     const mergeStrategy =
         validateOptionalEnum(args.merge_strategy, "merge_strategy", MERGE_STRATEGIES) ||
@@ -679,7 +889,8 @@ async function handleMergePR(args, client, policy = {}) {
         },
     );
     const scope = {
-        repositoryId: repository.id || policy.selectedRepositoryId || "",
+        action: "merge",
+        repositoryId,
         prId,
         mergeStrategy,
         closeSourceBranch,
@@ -687,17 +898,10 @@ async function handleMergePR(args, client, policy = {}) {
     };
 
     if (!confirmationToken) {
-        logger.logApiCall("GET", `pullrequests/${prId}`, "merge_pull_request", "in", {
-            phase: "preview",
-        });
-        const pr = await client.request("GET", client.repoPath(`pullrequests/${prId}`));
-        const state = String(pr.state || "").toUpperCase();
-        if (state && state !== "OPEN") {
-            throw new Error(`La pull request ${prId} non e' aperta (stato: ${state}).`);
-        }
-        const issued = mergeConfirmations.issue(scope);
+        const pr = await fetchOpenPullRequestForConfirmation(prId, client, "merge_pull_request");
+        const issued = mergeConfirmations.issue(scope, confirmationOwner(policy));
         logger.logAudit("merge_confirmation_issued", {
-            repository_id: scope.repositoryId,
+            repository_id: repositoryId,
             pr_id: prId,
             merge_strategy: mergeStrategy,
         });
@@ -705,43 +909,19 @@ async function handleMergePR(args, client, policy = {}) {
             merged: false,
             status: "confirmation_required",
             summary: {
-                repository_id: scope.repositoryId,
-                pr_id: pr.id,
-                title: pr.title,
-                author: pr.author?.display_name || null,
-                source_branch: pr.source?.branch?.name || null,
-                destination_branch: pr.destination?.branch?.name || null,
-                state: pr.state || null,
-                approvals: (pr.participants || []).filter((p) => p.approved).length,
-                comment_count: pr.comment_count ?? null,
-                task_count: pr.task_count ?? null,
+                ...summarizePullRequestForConfirmation(pr, repositoryId),
                 merge_strategy: mergeStrategy,
                 close_source_branch: closeSourceBranch,
                 message: message || null,
-                link: pr.links?.html?.href || null,
             },
             confirmation_token: issued.token,
             expires_in_seconds: Math.floor(issued.ttlMs / 1000),
             instructions:
-                "Mostra il riepilogo all'utente e chiedi conferma esplicita in chat. Solo dopo una risposta affermativa richiama merge_pull_request con gli stessi parametri e questo confirmation_token. Non procedere senza conferma.",
+                "Show the summary to the user and ask for explicit confirmation in chat. Only after an affirmative answer call merge_pull_request again with the same parameters and this confirmation_token. Do not proceed without confirmation.",
         };
     }
 
-    const consumed = mergeConfirmations.consume(confirmationToken, scope);
-    if (!consumed.ok) {
-        logger.logAudit("merge_confirmation_rejected", {
-            repository_id: scope.repositoryId,
-            pr_id: prId,
-            reason: consumed.reason,
-        });
-        const reasonText =
-            consumed.reason === "scope_mismatch"
-                ? "i parametri non coincidono con quelli del riepilogo confermato"
-                : "token sconosciuto, scaduto o gia' usato";
-        throw new Error(
-            `confirmation_token non valido (${reasonText}). Richiama merge_pull_request senza token per un nuovo riepilogo e chiedi di nuovo conferma all'utente.`,
-        );
-    }
+    consumeConfirmationOrThrow("merge_pull_request", confirmationToken, scope, policy);
 
     const body = {
         merge_strategy: mergeStrategy,
@@ -760,7 +940,7 @@ async function handleMergePR(args, client, policy = {}) {
         success: true,
     });
     logger.logAudit("merge_executed", {
-        repository_id: scope.repositoryId,
+        repository_id: repositoryId,
         pr_id: prId,
         merge_strategy: mergeStrategy,
     });
@@ -770,6 +950,52 @@ async function handleMergePR(args, client, policy = {}) {
         pr_id: prId,
         merge_strategy: mergeStrategy,
         merge_commit: result.merge_commit?.hash || null,
+        state: result.state || null,
+        link: result.links?.html?.href || null,
+    };
+}
+
+async function handleDeclinePR(args, client, policy = {}) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+    const repositoryId = requireAllowMerge(policy, "Decline");
+    const confirmationToken = validateOptionalString(
+        args.confirmation_token,
+        "confirmation_token",
+        {
+            maxLength: TOOL_LIMITS.confirmationTokenLength,
+        },
+    );
+    const scope = { action: "decline", repositoryId, prId };
+
+    if (!confirmationToken) {
+        const pr = await fetchOpenPullRequestForConfirmation(prId, client, "decline_pull_request");
+        const issued = mergeConfirmations.issue(scope, confirmationOwner(policy));
+        logger.logAudit("decline_confirmation_issued", {
+            repository_id: repositoryId,
+            pr_id: prId,
+        });
+        return {
+            declined: false,
+            status: "confirmation_required",
+            summary: summarizePullRequestForConfirmation(pr, repositoryId),
+            confirmation_token: issued.token,
+            expires_in_seconds: Math.floor(issued.ttlMs / 1000),
+            instructions:
+                "Show the summary to the user and ask for explicit confirmation in chat. Only after an affirmative answer call decline_pull_request again with the same pr_id and this confirmation_token. Do not proceed without confirmation.",
+        };
+    }
+
+    consumeConfirmationOrThrow("decline_pull_request", confirmationToken, scope, policy);
+
+    const path = `pullrequests/${prId}/decline`;
+    logger.logApiCall("POST", path, "decline_pull_request", "in", { phase: "confirmed" });
+    const result = await client.request("POST", client.repoPath(path));
+    logger.logApiCall("POST", path, "decline_pull_request", "out", { success: true });
+    logger.logAudit("decline_executed", { repository_id: repositoryId, pr_id: prId });
+
+    return {
+        declined: true,
+        pr_id: prId,
         state: result.state || null,
         link: result.links?.html?.href || null,
     };
@@ -785,7 +1011,7 @@ async function handleGenericApi(args, client) {
         .trim()
         .toUpperCase();
     if (method !== "GET") {
-        throw new Error("bb_api supporta solo richieste read-only GET.");
+        throw new Error("bb_api only supports read-only GET requests.");
     }
     assertRepoScopedApiPath(args.path, client);
     validateQueryParams(args.queryParams);
@@ -849,7 +1075,7 @@ async function fetchPullRequestPipelines(prId, client) {
     const statusContext = buildPullRequestStatusContext(statuses);
 
     if (!sourceBranch) {
-        throw new Error("Impossibile determinare source_branch dalla pull request.");
+        throw new Error("Unable to determine source_branch from the pull request.");
     }
 
     const preferredCommitHash =
@@ -1063,15 +1289,13 @@ async function readFailedStepLogs(pipelineUuid, client) {
         (step) => step,
     );
 
-    const failedSteps = steps
-        .filter(isFailedPipelineStep)
-        .slice(0, TOOL_LIMITS.pipelineFailedStepsCap);
+    const failedSteps = steps.filter(hasFailedState).slice(0, TOOL_LIMITS.pipelineFailedStepsCap);
     const failures = [];
 
     for (const step of failedSteps) {
         const stepUuid = normalizeBitbucketUuid(step.uuid, "step uuid");
         const normalizedLog = await readStepLogText(pipelineUuid, stepUuid, client);
-        const { text, truncated } = truncateText(normalizedLog, TOOL_LIMITS.pipelineLogBytes);
+        const { text, truncated } = truncateUtf8(normalizedLog, TOOL_LIMITS.pipelineLogBytes);
 
         failures.push({
             step: mapPipelineStep(step),
@@ -1141,7 +1365,7 @@ function buildPullRequestQuery(sourceBranch, destinationBranch) {
 function assertRepoScopedApiPath(rawPath, client) {
     const { workspace, repoSlug } = client.repoScope;
     if (!isRepoScopedBitbucketApiPath(rawPath, workspace, repoSlug)) {
-        throw new Error("bb_api puo' interrogare solo endpoint del repository configurato.");
+        throw new Error("bb_api can only query endpoints of the configured repository.");
     }
     return normalizeBitbucketApiPath(rawPath);
 }
@@ -1160,21 +1384,21 @@ function isExactOpenMatch(pr, args) {
 
 function requireStringParam(args, name, options = {}) {
     if (args[name] === undefined || args[name] === null || args[name] === "") {
-        throw new Error(`Parametro obbligatorio mancante: ${name}`);
+        throw new Error(`Missing required parameter: ${name}`);
     }
     return validateString(args[name], name, options);
 }
 
 function requirePositiveIntegerParam(args, name) {
     if (args[name] === undefined || args[name] === null || args[name] === "") {
-        throw new Error(`Parametro obbligatorio mancante: ${name}`);
+        throw new Error(`Missing required parameter: ${name}`);
     }
     return validateInteger(args[name], name, { min: 1 });
 }
 
 function requirePipelineUuid(value) {
     if (value === undefined || value === null || value === "") {
-        throw new Error("Parametro obbligatorio mancante: pipeline_ref");
+        throw new Error("Missing required parameter: pipeline_ref");
     }
     return normalizeBitbucketUuid(value, "pipeline_ref");
 }
@@ -1186,14 +1410,14 @@ function validateOptionalString(value, name, options = {}) {
 
 function validateString(value, name, { maxLength } = {}) {
     if (typeof value !== "string") {
-        throw new Error(`${name} deve essere una stringa.`);
+        throw new Error(`${name} must be a string.`);
     }
     const trimmed = value.trim();
     if (!trimmed) {
-        throw new Error(`${name} non puo' essere vuoto.`);
+        throw new Error(`${name} must not be empty.`);
     }
     if (maxLength && trimmed.length > maxLength) {
-        throw new Error(`${name} supera la lunghezza massima consentita (${maxLength}).`);
+        throw new Error(`${name} exceeds the maximum allowed length (${maxLength}).`);
     }
     return trimmed;
 }
@@ -1205,13 +1429,13 @@ function validateOptionalInteger(value, name, options = {}) {
 
 function validateInteger(value, name, { min, max } = {}) {
     if (!Number.isInteger(value)) {
-        throw new Error(`${name} deve essere un intero.`);
+        throw new Error(`${name} must be an integer.`);
     }
     if (min !== undefined && value < min) {
-        throw new Error(`${name} deve essere maggiore o uguale a ${min}.`);
+        throw new Error(`${name} must be greater than or equal to ${min}.`);
     }
     if (max !== undefined && value > max) {
-        throw new Error(`${name} deve essere minore o uguale a ${max}.`);
+        throw new Error(`${name} must be less than or equal to ${max}.`);
     }
     return value;
 }
@@ -1219,7 +1443,7 @@ function validateInteger(value, name, { min, max } = {}) {
 function validateOptionalBoolean(value, name) {
     if (value === undefined || value === null) return null;
     if (typeof value !== "boolean") {
-        throw new Error(`${name} deve essere booleano.`);
+        throw new Error(`${name} must be a boolean.`);
     }
     return value;
 }
@@ -1227,7 +1451,7 @@ function validateOptionalBoolean(value, name) {
 function validateOptionalEnum(value, name, allowedValues) {
     if (value === undefined || value === null || value === "") return null;
     if (!allowedValues.has(value)) {
-        throw new Error(`${name} non valido. Valori consentiti: ${[...allowedValues].join(", ")}.`);
+        throw new Error(`Invalid ${name}. Allowed values: ${[...allowedValues].join(", ")}.`);
     }
     return value;
 }
@@ -1235,10 +1459,10 @@ function validateOptionalEnum(value, name, allowedValues) {
 function validateReviewerList(reviewers) {
     if (reviewers === undefined || reviewers === null) return null;
     if (!Array.isArray(reviewers)) {
-        throw new Error("reviewers deve essere un array di stringhe.");
+        throw new Error("reviewers must be an array of strings.");
     }
     if (reviewers.length > TOOL_LIMITS.reviewers) {
-        throw new Error(`reviewers supera il massimo consentito (${TOOL_LIMITS.reviewers}).`);
+        throw new Error(`reviewers exceeds the maximum allowed (${TOOL_LIMITS.reviewers}).`);
     }
     for (const reviewer of reviewers) {
         validateString(reviewer, "reviewers[]", { maxLength: TOOL_LIMITS.reviewerIdLength });
@@ -1251,7 +1475,7 @@ function validateInlineCommentArgs(args) {
         args.file_path !== undefined && args.file_path !== null && args.file_path !== "";
     const hasLineTo = args.line_to !== undefined && args.line_to !== null && args.line_to !== "";
     if (hasFilePath !== hasLineTo) {
-        throw new Error("Per i commenti inline devi passare sia file_path sia line_to.");
+        throw new Error("Inline comments require both file_path and line_to.");
     }
     if (hasFilePath) {
         validateString(args.file_path, "file_path", { maxLength: TOOL_LIMITS.filePathLength });
@@ -1262,21 +1486,21 @@ function validateInlineCommentArgs(args) {
 function validateQueryParams(queryParams) {
     if (queryParams === undefined || queryParams === null) return null;
     if (typeof queryParams !== "object" || Array.isArray(queryParams)) {
-        throw new Error("queryParams deve essere un oggetto chiave/valore.");
+        throw new Error("queryParams must be a key/value object.");
     }
     const entries = Object.entries(queryParams);
     if (entries.length > TOOL_LIMITS.queryParams) {
-        throw new Error(`queryParams supera il massimo consentito (${TOOL_LIMITS.queryParams}).`);
+        throw new Error(`queryParams exceeds the maximum allowed (${TOOL_LIMITS.queryParams}).`);
     }
     for (const [key, value] of entries) {
         validateString(key, "queryParams key", { maxLength: TOOL_LIMITS.queryKeyLength });
         const scalar = String(value ?? "").trim();
         if (!scalar) {
-            throw new Error(`queryParams['${key}'] non puo' essere vuoto.`);
+            throw new Error(`queryParams['${key}'] must not be empty.`);
         }
         if (scalar.length > TOOL_LIMITS.queryValueLength) {
             throw new Error(
-                `queryParams['${key}'] supera la lunghezza massima consentita (${TOOL_LIMITS.queryValueLength}).`,
+                `queryParams['${key}'] exceeds the maximum allowed length (${TOOL_LIMITS.queryValueLength}).`,
             );
         }
     }
@@ -1288,20 +1512,10 @@ function normalizeBitbucketUuid(rawValue, label) {
     });
     const match = normalized.match(/\{?[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}?/);
     if (!match) {
-        throw new Error(`${label} deve contenere un UUID Bitbucket valido.`);
+        throw new Error(`${label} must contain a valid Bitbucket UUID.`);
     }
     const uuid = match[0].replace(/[{}]/g, "").toLowerCase();
     return `{${uuid}}`;
-}
-
-function truncateText(value, maxLength) {
-    if (value.length <= maxLength) {
-        return { text: value, truncated: false };
-    }
-    return {
-        text: value.slice(0, maxLength),
-        truncated: true,
-    };
 }
 
 function mapPrSummary(pr) {
@@ -1399,24 +1613,14 @@ function mapPipelineStep(step) {
     };
 }
 
-function isFailedPipelineStep(step) {
-    const state = String(step.state?.name || "")
-        .trim()
-        .toUpperCase();
-    const result = String(step.state?.result?.name || "")
-        .trim()
-        .toUpperCase();
+const FAILED_PIPELINE_STATES = new Set(["FAILED", "ERROR"]);
 
-    return result === "FAILED" || result === "ERROR" || state === "FAILED" || state === "ERROR";
-}
-
-function isFailedPipelineRun(pipeline) {
-    const state = String(pipeline.state?.name || "")
+function hasFailedState(entity) {
+    const state = String(entity?.state?.name || "")
         .trim()
         .toUpperCase();
-    const result = String(pipeline.state?.result?.name || "")
+    const result = String(entity?.state?.result?.name || "")
         .trim()
         .toUpperCase();
-
-    return result === "FAILED" || result === "ERROR" || state === "FAILED" || state === "ERROR";
+    return FAILED_PIPELINE_STATES.has(result) || FAILED_PIPELINE_STATES.has(state);
 }

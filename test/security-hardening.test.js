@@ -7,12 +7,15 @@ import {
 } from "../src/lib/bitbucket-client.js";
 import { getEnabledToolNames } from "../src/lib/tools.js";
 import { BitbucketRepositoryRegistry } from "../src/lib/repository-registry.js";
-import { createConfirmationStore } from "../src/lib/merge-confirmations.js";
+import {
+    ConfirmationStoreCapacityError,
+    createConfirmationStore,
+} from "../src/lib/merge-confirmations.js";
 
-test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
+test("unknown tools are rejected by the dispatcher", async () => {
     await assert.rejects(
-        () => handleToolCall("approve_pull_request", { pr_id: 123 }, {}),
-        /Tool non supportato/,
+        () => handleToolCall("delete_repository", { pr_id: 123 }, {}),
+        /Unsupported tool/,
     );
 });
 
@@ -25,11 +28,11 @@ test("merge_pull_request is refused when the repository does not allow merges", 
                 {},
                 { selectedRepository: { id: "repo", allowMerge: false } },
             ),
-        /Merge non consentito/,
+        /Merge is not allowed/,
     );
     await assert.rejects(
         () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}, {}),
-        /Merge non consentito/,
+        /Merge is not allowed/,
     );
 });
 
@@ -79,7 +82,7 @@ test("merge_pull_request requires a confirmed token before merging", async () =>
                 client,
                 policy,
             ),
-        /confirmation_token non valido/,
+        /Invalid confirmation_token/,
     );
     await assert.rejects(
         () =>
@@ -93,7 +96,7 @@ test("merge_pull_request requires a confirmed token before merging", async () =>
                 client,
                 policy,
             ),
-        /parametri non coincidono/,
+        /parameters do not match/,
     );
     assert.equal(requests.filter((r) => r.method === "POST").length, 0);
 
@@ -118,7 +121,7 @@ test("merge_pull_request requires a confirmed token before merging", async () =>
                 client,
                 policy,
             ),
-        /confirmation_token non valido/,
+        /Invalid confirmation_token/,
     );
 });
 
@@ -136,7 +139,7 @@ test("merge_pull_request preview refuses pull requests that are not open", async
             handleToolCall("merge_pull_request", { pr_id: 7 }, client, {
                 selectedRepository: { id: "repo", allowMerge: true },
             }),
-        /non e' aperta/,
+        /is not open/,
     );
 });
 
@@ -206,7 +209,7 @@ test("run_pipeline posts a branch target with optional custom selector and varia
     await assert.rejects(
         () =>
             handleToolCall("run_pipeline", { branch: "x", variables: { "bad key": "v" } }, client),
-        /Nome variabile/,
+        /Invalid pipeline variable name/,
     );
 });
 
@@ -464,6 +467,7 @@ test("find_open_pull_request returns the matching open PR summary", async () => 
             comment_count: 3,
             link: "https://bitbucket/pr/11",
         },
+        truncated: false,
     });
 });
 
@@ -485,7 +489,7 @@ test("find_open_pull_request returns null when no open PR matches", async () => 
         client,
     );
 
-    assert.deepEqual(result, { pull_request: null });
+    assert.deepEqual(result, { pull_request: null, truncated: false });
 });
 
 test("open_pull_request is a thin alias for create_pull_request", async () => {
@@ -578,7 +582,7 @@ test("bb_api rejects non-GET methods", async () => {
                 { method: "POST", path: "/repositories/ws/repo/pipelines" },
                 {},
             ),
-        /solo richieste read-only GET/,
+        /only supports read-only GET/,
     );
 });
 
@@ -597,7 +601,7 @@ test("bb_api rejects paths outside the configured repository scope", async () =>
                 { method: "GET", path: "/repositories/other/workspace/pipelines" },
                 client,
             ),
-        /repository configurato/,
+        /configured repository/,
     );
 });
 
@@ -1235,7 +1239,7 @@ test("get_pipeline_failure_output returns failed steps and log output", async ()
 test("get_pipeline_run rejects invalid pipeline refs", async () => {
     await assert.rejects(
         () => handleToolCall("get_pipeline_run", { pipeline_ref: "not-a-pipeline" }, {}),
-        /pipeline_ref deve contenere un UUID Bitbucket valido/,
+        /pipeline_ref must contain a valid Bitbucket UUID/,
     );
 });
 
@@ -1283,7 +1287,7 @@ test("create_pull_request rejects identical source and destination branches", as
                 },
                 client,
             ),
-        /non possono coincidere/,
+        /must differ/,
     );
 });
 
@@ -1305,6 +1309,146 @@ test("add_pull_request_comment requires both file_path and line_to for inline co
                 },
                 client,
             ),
-        /sia file_path sia line_to/,
+        /both file_path and line_to/,
     );
+});
+
+test("repo scoped API path helper rejects traversal and encoded escapes", () => {
+    const rejected = [
+        "/repositories/ws/repo/../../workspaces",
+        "/repositories/ws/repo/..",
+        "/repositories/ws/repo/pipelines/../../other/pipelines",
+        "/repositories/ws/repo/./../other",
+        "/repositories/ws/repo/%2e%2e/%2e%2e/workspaces",
+        "/repositories/ws/repo/%2F..%2Fother",
+        "/repositories/ws/repo/..\\..\\other",
+        "/repositories/ws/repo\\..\\other",
+        "/repositories/ws/repository-other/pipelines",
+        "",
+    ];
+    for (const rawPath of rejected) {
+        assert.equal(isRepoScopedBitbucketApiPath(rawPath, "ws", "repo"), false, rawPath);
+    }
+    assert.equal(isRepoScopedBitbucketApiPath("/2.0/repositories/ws/repo", "ws", "repo"), true);
+    assert.equal(
+        isRepoScopedBitbucketApiPath("repositories/ws/repo/pullrequests/1", "ws", "repo"),
+        true,
+    );
+    assert.equal(
+        isRepoScopedBitbucketApiPath("/repositories/ws/repo/src/main/a..b.txt", "ws", "repo"),
+        true,
+    );
+});
+
+test("bb_api refuses dot-segment traversal out of the repository scope", async () => {
+    const client = {
+        repoScope: { workspace: "ws", repoSlug: "repo" },
+        async request() {
+            throw new Error("should not be called");
+        },
+    };
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "bb_api",
+                { method: "GET", path: "/repositories/ws/repo/../../workspaces" },
+                client,
+            ),
+        /configured repository/,
+    );
+});
+
+function createMergeClient(requests) {
+    return {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            if (method === "GET") {
+                return { id: 42, title: "Feature", state: "OPEN" };
+            }
+            return { state: "MERGED", merge_commit: { hash: "abc123" } };
+        },
+    };
+}
+
+test("merge confirmation tokens are bound to the MCP session that requested them", async () => {
+    mergeConfirmations.clear();
+    const requests = [];
+    const client = createMergeClient(requests);
+    const repository = { id: "repo", allowMerge: true };
+    const sessionA = { selectedRepository: repository, sessionId: "session-a" };
+    const sessionB = { selectedRepository: repository, sessionId: "session-b" };
+
+    const preview = await handleToolCall("merge_pull_request", { pr_id: 42 }, client, sessionA);
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                { pr_id: 42, confirmation_token: preview.confirmation_token },
+                client,
+                sessionB,
+            ),
+        /Invalid confirmation_token/,
+    );
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                { pr_id: 42, confirmation_token: preview.confirmation_token },
+                client,
+                { selectedRepository: repository },
+            ),
+        /Invalid confirmation_token/,
+    );
+    assert.equal(requests.filter((r) => r.method === "POST").length, 0);
+
+    const merged = await handleToolCall(
+        "merge_pull_request",
+        { pr_id: 42, confirmation_token: preview.confirmation_token },
+        client,
+        sessionA,
+    );
+    assert.equal(merged.merged, true);
+    mergeConfirmations.clear();
+});
+
+test("confirmation store evicts only the oldest token of the same owner", () => {
+    const store = createConfirmationStore({ maxPending: 100, maxPendingPerOwner: 2 });
+    const victim = store.issue({ prId: 1 }, { owner: "victim" });
+    const first = store.issue({ prId: 2 }, { owner: "attacker" });
+    store.issue({ prId: 3 }, { owner: "attacker" });
+    for (let index = 0; index < 50; index += 1) {
+        store.issue({ prId: 4 }, { owner: "attacker" });
+    }
+
+    assert.equal(store.size(), 3);
+    assert.equal(store.consume(first.token, { prId: 2 }, { owner: "attacker" }).ok, false);
+    assert.equal(store.consume(victim.token, { prId: 1 }, { owner: "victim" }).ok, true);
+});
+
+test("confirmation store refuses new tokens instead of evicting other owners when full", () => {
+    const store = createConfirmationStore({ maxPending: 2, maxPendingPerOwner: 5 });
+    const a = store.issue({ prId: 1 }, { owner: "a" });
+    store.issue({ prId: 2 }, { owner: "b" });
+
+    assert.throws(
+        () => store.issue({ prId: 3 }, { owner: "c" }),
+        (error) => error instanceof ConfirmationStoreCapacityError && error.status === 503,
+    );
+    assert.equal(store.consume(a.token, { prId: 1 }, { owner: "a" }).ok, true);
+    assert.ok(store.issue({ prId: 3 }, { owner: "c" }).token);
+});
+
+test("a token presented by another owner is not burned", () => {
+    const store = createConfirmationStore();
+    const issued = store.issue({ prId: 1 }, { owner: "a" });
+
+    assert.equal(
+        store.consume(issued.token, { prId: 1 }, { owner: "b" }).reason,
+        "unknown_or_expired",
+    );
+    assert.equal(store.consume(issued.token, { prId: 1 }, { owner: "a" }).ok, true);
 });

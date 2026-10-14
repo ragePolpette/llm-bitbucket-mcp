@@ -9,3 +9,11 @@ export function buildHealthPayload({ endpoint, sessions, uptimeSec }) {
         activeSessions: sessions.size(),
     };
 }
+
+export function buildPublicHealthPayload({ uptimeSec }) {
+    return {
+        status: "ok",
+        server: SERVER_NAME,
+        uptimeSec,
+    };
+}

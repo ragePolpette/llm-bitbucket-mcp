@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+import { createRepositoryRegistryFromConfig } from "../src/lib/runtime.js";
+import { mergeConfirmations } from "../src/lib/handlers.js";
 
 import { createSessionStore } from "../src/lib/session-store.js";
 import { createApp } from "../src/lib/app.js";
@@ -36,6 +42,31 @@ function createTestConfig() {
     };
 }
 
+function initializeRequest(id = 1) {
+    return {
+        jsonrpc: "2.0",
+        id,
+        method: "initialize",
+        params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "test-client", version: "1.0.0" },
+        },
+    };
+}
+
+function postJson(url, body, headers = {}) {
+    return fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/event-stream",
+            ...headers,
+        },
+        body: JSON.stringify(body),
+    });
+}
+
 async function withTestServer(run, configOverrides = {}) {
     const config = {
         ...createTestConfig(),
@@ -49,7 +80,10 @@ async function withTestServer(run, configOverrides = {}) {
             ...(configOverrides.security || {}),
         },
     };
-    const sessions = createSessionStore({ ttlMs: 60_000, maxSessions: 10 });
+    const sessions = createSessionStore({
+        ttlMs: 60_000,
+        maxSessions: configOverrides.maxSessions || 10,
+    });
     const metrics = createRuntimeMetrics();
     const client = {
         defaultDestinationBranch: "",
@@ -166,14 +200,36 @@ test("POST /mcp returns invalid session when the session id is unknown", async (
     });
 });
 
-test("health endpoint requires API key when auth is enabled", async () => {
+test("health endpoint stays public but minimal when auth is enabled", async () => {
     await withTestServer(
         async ({ baseUrl }) => {
-            const response = await fetch(`${baseUrl}${HEALTH_ENDPOINT}`);
-            const payload = await response.json();
+            const anonymous = await fetch(`${baseUrl}${HEALTH_ENDPOINT}`);
+            const anonymousPayload = await anonymous.json();
+            assert.equal(anonymous.status, 200);
+            assert.deepEqual(Object.keys(anonymousPayload).sort(), [
+                "server",
+                "status",
+                "uptimeSec",
+            ]);
+            assert.equal(anonymousPayload.status, "ok");
 
-            assert.equal(response.status, 401);
-            assert.match(payload.error.message, /invalid API key/);
+            const authenticated = await fetch(`${baseUrl}${HEALTH_ENDPOINT}`, {
+                headers: { "x-mcp-api-key": "shared-secret-key" },
+            });
+            const authenticatedPayload = await authenticated.json();
+            assert.equal(authenticated.status, 200);
+            assert.equal(authenticatedPayload.endpoint, "/mcp");
+            assert.equal(authenticatedPayload.activeSessions, 0);
+
+            const metrics = await fetch(`${baseUrl}${METRICS_ENDPOINT}`);
+            assert.equal(metrics.status, 401);
+
+            const mcp = await fetch(`${baseUrl}/mcp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(initializeRequest()),
+            });
+            assert.equal(mcp.status, 401);
         },
         {
             security: {
@@ -181,6 +237,25 @@ test("health endpoint requires API key when auth is enabled", async () => {
                 internalApiKey: "shared-secret-key",
             },
         },
+    );
+});
+
+test("POST /mcp initialize answers 503 without creating a session when capacity is reached", async () => {
+    await withTestServer(
+        async ({ baseUrl, sessions }) => {
+            const first = await postJson(`${baseUrl}/mcp`, initializeRequest());
+            assert.equal(first.status, 200);
+            assert.ok(first.headers.get(MCP_SESSION_HEADER));
+            assert.equal(sessions.size(), 1);
+
+            const second = await postJson(`${baseUrl}/mcp`, initializeRequest());
+            const payload = await second.json();
+            assert.equal(second.status, 503);
+            assert.match(payload.error.message, /Session limit reached/);
+            assert.equal(second.headers.get(MCP_SESSION_HEADER), null);
+            assert.equal(sessions.size(), 1);
+        },
+        { maxSessions: 1 },
     );
 });
 
@@ -232,4 +307,153 @@ test("metrics endpoint exposes essential runtime counters", async () => {
         assert.equal(payload.metrics.http.statusBuckets["2xx"] >= 1, true);
         assert.equal(payload.metrics.http.statusBuckets["4xx"] >= 1, true);
     });
+});
+
+function listen(target) {
+    return new Promise((resolve, reject) => {
+        const instance = target.listen(0, "127.0.0.1", (error) =>
+            error ? reject(error) : resolve(instance),
+        );
+    });
+}
+
+function close(server) {
+    return new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+    });
+}
+
+function parseToolResult(result) {
+    return JSON.parse(result.content[0].text);
+}
+
+test("end to end: initialize, tools/list and tools/call against a stub Bitbucket API", async () => {
+    mergeConfirmations.clear();
+    const bitbucketRequests = [];
+    const pullRequest = {
+        id: 42,
+        title: "Feature",
+        state: "OPEN",
+        author: { display_name: "Dev" },
+        source: { branch: { name: "feature/x" } },
+        destination: { branch: { name: "main" } },
+        participants: [],
+        links: { html: { href: "https://bitbucket/pr/42" } },
+    };
+    const bitbucket = http.createServer((req, res) => {
+        bitbucketRequests.push({
+            method: req.method,
+            url: req.url,
+            authorization: req.headers.authorization,
+        });
+        res.setHeader("Content-Type", "application/json");
+        if (req.method === "GET" && req.url === "/2.0/repositories/ws/repo/pullrequests/42") {
+            res.end(JSON.stringify(pullRequest));
+            return;
+        }
+        if (
+            req.method === "POST" &&
+            req.url === "/2.0/repositories/ws/repo/pullrequests/42/merge"
+        ) {
+            res.end(JSON.stringify({ state: "MERGED", merge_commit: { hash: "abc123" } }));
+            return;
+        }
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: { message: "not found" } }));
+    });
+    await listen(bitbucket);
+
+    const config = {
+        ...createTestConfig(),
+        bitbucket: {
+            apiBase: `http://127.0.0.1:${bitbucket.address().port}`,
+            userEmail: "dev@example.com",
+            apiToken: "runtime-token",
+            defaultRepositoryId: "main-repo",
+            repositories: [
+                {
+                    id: "main-repo",
+                    displayName: "Main",
+                    workspace: "ws",
+                    repoSlug: "repo",
+                    defaultDestinationBranch: "main",
+                    status: "active",
+                    allowMerge: true,
+                },
+            ],
+        },
+        requestTimeoutMs: 5_000,
+        retry: { maxAttempts: 1, baseDelayMs: 50 },
+        maxResponseBytes: 1024 * 1024,
+    };
+    config.security = {
+        ...config.security,
+        enabledWriteTools: ["add_pull_request_comment", "merge_pull_request"],
+    };
+    const metrics = createRuntimeMetrics();
+    const sessions = createSessionStore({ ttlMs: 60_000, maxSessions: 10 });
+    const repositories = createRepositoryRegistryFromConfig(config, metrics);
+    const clientA = new Client({ name: "client-a", version: "1.0.0" });
+    const clientB = new Client({ name: "client-b", version: "1.0.0" });
+    let mcpServer = null;
+    try {
+        mcpServer = await listen(createApp(config, sessions, repositories, metrics));
+        const endpoint = new URL(`http://127.0.0.1:${mcpServer.address().port}/mcp`);
+        await clientA.connect(new StreamableHTTPClientTransport(endpoint));
+        await clientB.connect(new StreamableHTTPClientTransport(endpoint));
+        assert.equal(sessions.size(), 2);
+
+        const { tools } = await clientA.listTools();
+        const names = tools.map((tool) => tool.name);
+        assert.ok(names.includes("get_pull_request"));
+        assert.ok(names.includes("wait_for_pipeline"));
+        assert.ok(names.includes("merge_pull_request"));
+        assert.equal(names.includes("decline_pull_request"), false);
+        assert.equal(names.includes("approve_pull_request"), false);
+        assert.equal(names.includes("create_pull_request"), false);
+        assert.ok(tools.every((tool) => tool.inputSchema.properties.repository_id));
+
+        const pr = parseToolResult(
+            await clientA.callTool({ name: "get_pull_request", arguments: { pr_id: 42 } }),
+        );
+        assert.equal(pr.id, 42);
+        assert.equal(pr.source_branch, "feature/x");
+        assert.match(bitbucketRequests[0].authorization, /^Basic /);
+
+        const blocked = await clientA.callTool({
+            name: "approve_pull_request",
+            arguments: { pr_id: 42 },
+        });
+        assert.equal(blocked.isError, true);
+        assert.match(parseToolResult(blocked).error, /not exposed/);
+
+        const preview = parseToolResult(
+            await clientA.callTool({ name: "merge_pull_request", arguments: { pr_id: 42 } }),
+        );
+        assert.equal(preview.status, "confirmation_required");
+
+        const stolen = await clientB.callTool({
+            name: "merge_pull_request",
+            arguments: { pr_id: 42, confirmation_token: preview.confirmation_token },
+        });
+        assert.equal(stolen.isError, true);
+        assert.match(parseToolResult(stolen).error, /Invalid confirmation_token/);
+        assert.equal(bitbucketRequests.filter((r) => r.method === "POST").length, 0);
+
+        const merged = parseToolResult(
+            await clientA.callTool({
+                name: "merge_pull_request",
+                arguments: { pr_id: 42, confirmation_token: preview.confirmation_token },
+            }),
+        );
+        assert.equal(merged.merged, true);
+        assert.equal(merged.merge_commit, "abc123");
+        assert.equal(bitbucketRequests.filter((r) => r.method === "POST").length, 1);
+    } finally {
+        await clientA.close();
+        await clientB.close();
+        if (mcpServer) await close(mcpServer);
+        await close(bitbucket);
+        mergeConfirmations.clear();
+    }
 });
