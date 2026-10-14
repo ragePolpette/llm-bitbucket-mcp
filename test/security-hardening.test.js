@@ -1,21 +1,322 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleToolCall } from "../src/lib/handlers.js";
+import { handleToolCall, mergeConfirmations } from "../src/lib/handlers.js";
 import {
     isRepoScopedBitbucketApiPath,
     normalizeBitbucketApiPath,
 } from "../src/lib/bitbucket-client.js";
 import { getEnabledToolNames } from "../src/lib/tools.js";
+import { BitbucketRepositoryRegistry } from "../src/lib/repository-registry.js";
+import { createConfirmationStore } from "../src/lib/merge-confirmations.js";
 
 test("still-hidden pull request mutation handlers are rejected by dispatcher", async () => {
     await assert.rejects(
         () => handleToolCall("approve_pull_request", { pr_id: 123 }, {}),
         /Tool non supportato/,
     );
+});
+
+test("merge_pull_request is refused when the repository does not allow merges", async () => {
     await assert.rejects(
-        () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}),
-        /Tool non supportato/,
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                { pr_id: 123 },
+                {},
+                { selectedRepository: { id: "repo", allowMerge: false } },
+            ),
+        /Merge non consentito/,
     );
+    await assert.rejects(
+        () => handleToolCall("merge_pull_request", { pr_id: 123 }, {}, {}),
+        /Merge non consentito/,
+    );
+});
+
+test("merge_pull_request requires a confirmed token before merging", async () => {
+    mergeConfirmations.clear();
+    const requests = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            if (method === "GET") {
+                return {
+                    id: 42,
+                    title: "Feature",
+                    state: "OPEN",
+                    author: { display_name: "Dev" },
+                    source: { branch: { name: "feature/x" } },
+                    destination: { branch: { name: "main" } },
+                    participants: [{ approved: true }, { approved: false }],
+                    links: { html: { href: "https://bitbucket/pr/42" } },
+                };
+            }
+            return {
+                state: "MERGED",
+                merge_commit: { hash: "abc123" },
+                links: { html: { href: "https://bitbucket/pr/42" } },
+            };
+        },
+    };
+    const policy = { selectedRepository: { id: "repo", allowMerge: true } };
+
+    const preview = await handleToolCall("merge_pull_request", { pr_id: 42 }, client, policy);
+    assert.equal(preview.merged, false);
+    assert.equal(preview.status, "confirmation_required");
+    assert.equal(preview.summary.source_branch, "feature/x");
+    assert.equal(preview.summary.approvals, 1);
+    assert.ok(preview.confirmation_token);
+    assert.equal(requests.filter((r) => r.method === "POST").length, 0);
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                { pr_id: 42, confirmation_token: "wrong-token" },
+                client,
+                policy,
+            ),
+        /confirmation_token non valido/,
+    );
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                {
+                    pr_id: 42,
+                    merge_strategy: "squash",
+                    confirmation_token: preview.confirmation_token,
+                },
+                client,
+                policy,
+            ),
+        /parametri non coincidono/,
+    );
+    assert.equal(requests.filter((r) => r.method === "POST").length, 0);
+
+    const retry = await handleToolCall("merge_pull_request", { pr_id: 42 }, client, policy);
+    const merged = await handleToolCall(
+        "merge_pull_request",
+        { pr_id: 42, confirmation_token: retry.confirmation_token },
+        client,
+        policy,
+    );
+    assert.equal(merged.merged, true);
+    assert.equal(merged.merge_commit, "abc123");
+    const post = requests.find((r) => r.method === "POST");
+    assert.equal(post.path, "/repositories/ws/repo/pullrequests/42/merge");
+    assert.deepEqual(post.body, { merge_strategy: "merge_commit", close_source_branch: true });
+
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "merge_pull_request",
+                { pr_id: 42, confirmation_token: retry.confirmation_token },
+                client,
+                policy,
+            ),
+        /confirmation_token non valido/,
+    );
+});
+
+test("merge_pull_request preview refuses pull requests that are not open", async () => {
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request() {
+            return { id: 7, state: "MERGED" };
+        },
+    };
+    await assert.rejects(
+        () =>
+            handleToolCall("merge_pull_request", { pr_id: 7 }, client, {
+                selectedRepository: { id: "repo", allowMerge: true },
+            }),
+        /non e' aperta/,
+    );
+});
+
+test("confirmation store expires tokens and binds them to their scope", () => {
+    let clock = 1000;
+    const store = createConfirmationStore({ ttlMs: 100, now: () => clock });
+    const { token } = store.issue({ prId: 1 });
+    assert.equal(store.consume(token, { prId: 2 }).ok, false);
+    const second = store.issue({ prId: 1 });
+    clock += 101;
+    assert.equal(store.consume(second.token, { prId: 1 }).reason, "unknown_or_expired");
+    assert.equal(store.consume("", { prId: 1 }).reason, "missing");
+    assert.equal(store.size(), 0);
+});
+
+test("run_pipeline posts a branch target with optional custom selector and variables", async () => {
+    const requests = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, { body } = {}) {
+            requests.push({ method, path, body });
+            return {
+                uuid: "{pipe-1}",
+                build_number: 12,
+                state: { name: "PENDING" },
+                target: { ref_name: body.target.ref_name },
+                links: { html: { href: "https://bitbucket/pipelines/12" } },
+            };
+        },
+    };
+
+    const simple = await handleToolCall("run_pipeline", { branch: "develop" }, client);
+    assert.equal(simple.started, true);
+    assert.equal(simple.pipeline.build_number, 12);
+    assert.deepEqual(requests[0].body, {
+        target: { type: "pipeline_ref_target", ref_type: "branch", ref_name: "develop" },
+    });
+
+    await handleToolCall(
+        "run_pipeline",
+        {
+            branch: "release/1.0",
+            pipeline_name: "deploy-staging",
+            commit_hash: "A".repeat(40),
+            variables: { TARGET_ENV: "staging" },
+        },
+        client,
+    );
+    assert.deepEqual(requests[1].body, {
+        target: {
+            type: "pipeline_ref_target",
+            ref_type: "branch",
+            ref_name: "release/1.0",
+            commit: { type: "commit", hash: "a".repeat(40) },
+            selector: { type: "custom", pattern: "deploy-staging" },
+        },
+        variables: [{ key: "TARGET_ENV", value: "staging", secured: false }],
+    });
+
+    await assert.rejects(() => handleToolCall("run_pipeline", {}, client), /branch/);
+    await assert.rejects(
+        () => handleToolCall("run_pipeline", { branch: "x", commit_hash: "short" }, client),
+        /commit_hash/,
+    );
+    await assert.rejects(
+        () =>
+            handleToolCall("run_pipeline", { branch: "x", variables: { "bad key": "v" } }, client),
+        /Nome variabile/,
+    );
+});
+
+test("pipeline step logs are requested with an octet-stream friendly Accept header", async () => {
+    const requests = [];
+    const client = {
+        repoPath(path) {
+            return `/repositories/ws/repo/${path}`;
+        },
+        async request(method, path, options = {}) {
+            requests.push({ method, path, options });
+            if (path.endsWith("/log")) {
+                return "line 1\nline 2";
+            }
+            if (path.endsWith("/steps")) {
+                return {
+                    values: [
+                        {
+                            uuid: "{22222222-2222-2222-2222-222222222222}",
+                            name: "build",
+                            state: { name: "COMPLETED", result: { name: "FAILED" } },
+                        },
+                        {
+                            uuid: "{33333333-3333-3333-3333-333333333333}",
+                            name: "test",
+                            state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } },
+                        },
+                    ],
+                };
+            }
+            if (path.endsWith("/steps/{33333333-3333-3333-3333-333333333333}")) {
+                return {
+                    uuid: "{33333333-3333-3333-3333-333333333333}",
+                    name: "test",
+                    state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } },
+                };
+            }
+            return {
+                uuid: "{11111111-1111-1111-1111-111111111111}",
+                state: { name: "COMPLETED", result: { name: "FAILED" } },
+            };
+        },
+    };
+
+    const failures = await handleToolCall(
+        "get_pipeline_failure_output",
+        { pipeline_ref: "11111111-1111-1111-1111-111111111111" },
+        client,
+    );
+    assert.equal(failures.failure_count, 1);
+    assert.equal(failures.failures[0].log, "line 1\nline 2");
+    const logRequest = requests.find((r) => r.path.endsWith("/log"));
+    assert.match(logRequest.options.accept, /application\/octet-stream/);
+    assert.match(logRequest.options.accept, /\*\/\*/);
+
+    const steps = await handleToolCall(
+        "list_pipeline_steps",
+        { pipeline_ref: "11111111-1111-1111-1111-111111111111" },
+        client,
+    );
+    assert.equal(steps.step_count, 2);
+    assert.equal(steps.steps[1].name, "test");
+
+    const stepLog = await handleToolCall(
+        "get_pipeline_step_log",
+        {
+            pipeline_ref: "{11111111-1111-1111-1111-111111111111}",
+            step_uuid: "33333333-3333-3333-3333-333333333333",
+        },
+        client,
+    );
+    assert.equal(stepLog.step.name, "test");
+    assert.equal(stepLog.log, "line 1\nline 2");
+    await assert.rejects(
+        () =>
+            handleToolCall(
+                "get_pipeline_step_log",
+                { pipeline_ref: "11111111-1111-1111-1111-111111111111" },
+                client,
+            ),
+        /step_uuid/,
+    );
+});
+
+test("merge tool is hidden from the surface unless a repository allows merges", () => {
+    const registryWithoutMerge = new BitbucketRepositoryRegistry(
+        [{ id: "a", workspace: "ws", repoSlug: "a", status: "active", allowMerge: false }],
+        "a",
+        () => ({}),
+    );
+    const registryWithMerge = new BitbucketRepositoryRegistry(
+        [
+            { id: "a", workspace: "ws", repoSlug: "a", status: "active", allowMerge: false },
+            { id: "b", workspace: "ws", repoSlug: "b", status: "active", allowMerge: true },
+            { id: "c", workspace: "ws", repoSlug: "c", status: "disabled", allowMerge: true },
+        ],
+        "a",
+        () => ({}),
+    );
+
+    assert.equal(registryWithoutMerge.mergeAvailable, false);
+    assert.equal(registryWithMerge.mergeAvailable, true);
+    assert.equal(registryWithMerge.list().find((r) => r.id === "b").allowMerge, true);
+    assert.equal(registryWithMerge.describe(registryWithMerge.resolve("a")).allowMerge, false);
+
+    const hidden = getEnabledToolNames(undefined, { mergeAvailable: false });
+    const shown = getEnabledToolNames(undefined, { mergeAvailable: true });
+    assert.equal(hidden.has("merge_pull_request"), false);
+    assert.equal(hidden.has("run_pipeline"), true);
+    assert.equal(shown.has("merge_pull_request"), true);
 });
 
 test("write tool allowlist can remove selected write tools from the exposed surface", () => {
@@ -24,6 +325,8 @@ test("write tool allowlist can remove selected write tools from the exposed surf
     assert.equal(enabledToolNames.has("add_pull_request_comment"), true);
     assert.equal(enabledToolNames.has("create_pull_request"), false);
     assert.equal(enabledToolNames.has("open_pull_request"), false);
+    assert.equal(enabledToolNames.has("run_pipeline"), false);
+    assert.equal(enabledToolNames.has("merge_pull_request"), false);
     assert.equal(enabledToolNames.has("get_pull_request"), true);
     assert.equal(enabledToolNames.has("bb_api"), false);
 });
@@ -909,7 +1212,7 @@ test("get_pipeline_failure_output returns failed steps and log output", async ()
         accept: undefined,
         queryParams: { pagelen: "100" },
     });
-    assert.equal(calls[2].accept, "text/plain");
+    assert.equal(calls[2].accept, "application/octet-stream, text/plain;q=0.9, */*;q=0.8");
     assert.equal(result.failure_count, 1);
     assert.deepEqual(result.failures, [
         {

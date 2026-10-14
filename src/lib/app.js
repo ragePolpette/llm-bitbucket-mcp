@@ -37,8 +37,9 @@ function asTextResult(payload) {
 }
 
 function createMcpServer(repositories, config, metrics) {
-    const enabledTools = getEnabledTools(config.security.enabledWriteTools);
-    const enabledToolNames = getEnabledToolNames(config.security.enabledWriteTools);
+    const toolOptions = { mergeAvailable: repositories.mergeAvailable === true };
+    const enabledTools = getEnabledTools(config.security.enabledWriteTools, toolOptions);
+    const enabledToolNames = getEnabledToolNames(config.security.enabledWriteTools, toolOptions);
     const server = new Server(
         { name: SERVER_NAME, version: SERVER_VERSION },
         { capabilities: { tools: {} } },
@@ -61,6 +62,7 @@ function createMcpServer(repositories, config, metrics) {
                 ...config.security,
                 repositories: repositories.list(),
                 selectedRepositoryId: repository.id,
+                selectedRepository: repositories.describe(repository),
                 defaultRepositoryId: repositories.defaultRepositoryId,
             });
             metrics?.recordToolCall(name, "success");

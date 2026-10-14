@@ -36,6 +36,70 @@ async function withStubBitbucketServer(handler, run) {
     }
 }
 
+test("BitbucketClient reads pipeline step logs served as octet-stream and follows redirects", async () => {
+    const seenAccept = [];
+
+    await withStubBitbucketServer(
+        (req, res) => {
+            seenAccept.push(req.headers.accept);
+            if (req.url.endsWith("/log")) {
+                res.writeHead(302, { Location: "/download/log.txt" });
+                res.end();
+                return;
+            }
+            if (req.url === "/download/log.txt") {
+                res.writeHead(200, { "Content-Type": "application/octet-stream" });
+                res.end("step output\nline 2");
+                return;
+            }
+            if (req.url.endsWith("/strict")) {
+                if (!String(req.headers.accept || "").includes("application/octet-stream")) {
+                    res.writeHead(406, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: { message: "Not Acceptable" } }));
+                    return;
+                }
+                res.writeHead(200, { "Content-Type": "application/octet-stream" });
+                res.end("strict log");
+                return;
+            }
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: { message: "nope" } }));
+        },
+        async ({ apiBase }) => {
+            const client = new BitbucketClient({
+                apiBase,
+                workspace: "ws",
+                repoSlug: "repo",
+                userEmail: "dev@example.com",
+                apiToken: "runtime-token",
+                requestTimeoutMs: 2_000,
+                retryMaxAttempts: 1,
+                retryBaseDelayMs: 5,
+                maxResponseBytes: 1_024,
+                defaultDestinationBranch: "main",
+            });
+            const accept = "application/octet-stream, text/plain;q=0.9, */*;q=0.8";
+
+            const log = await client.request(
+                "GET",
+                "/repositories/ws/repo/pipelines/{p}/steps/{s}/log",
+                { accept },
+            );
+            assert.equal(log, "step output\nline 2");
+
+            const strict = await client.request("GET", "/repositories/ws/repo/strict", { accept });
+            assert.equal(strict, "strict log");
+
+            await assert.rejects(
+                () =>
+                    client.request("GET", "/repositories/ws/repo/strict", { accept: "text/plain" }),
+                (error) => error instanceof BitbucketApiError && error.status === 406,
+            );
+            assert.ok(seenAccept.every(Boolean));
+        },
+    );
+});
+
 test("BitbucketClient retries transient GET failures against a controlled sandbox", async () => {
     let requests = 0;
     const metrics = createRuntimeMetrics();

@@ -10,9 +10,12 @@ The server exposes a focused Bitbucket MCP surface for:
 
 - pull request discovery and inspection
 - diff, comments, commits, tasks, and status retrieval
-- pipeline lookup and failed-step log extraction
+- pipeline lookup, step listing and log extraction (failed or any step)
+- pipeline runs on a branch (default or custom pipeline)
 - pull request creation
 - pull request comments
+- pull request merge gated per repository and by an explicit two-step confirmation
+- multiple approved repositories selected per tool call via `repository_id`
 - a constrained repository-scoped API escape hatch kept out of the default public tool catalog
 
 Current exposed tools:
@@ -30,9 +33,13 @@ Current exposed tools:
 - `get_pull_request_pipeline_failure_output`
 - `get_pipeline_run`
 - `get_pipeline_failure_output`
+- `list_pipeline_steps`
+- `get_pipeline_step_log`
 - `add_pull_request_comment`
 - `create_pull_request`
 - `open_pull_request`
+- `run_pipeline`
+- `merge_pull_request` (only listed when at least one active repository has `allowMerge: true`)
 
 ## Scope And Non-Goals
 
@@ -46,7 +53,7 @@ Out of scope:
 
 - local checkout and branch management
 - commit creation
-- merge automation
+- unattended merge automation (merges always require an explicit human confirmation)
 - approval automation
 - generic git workstation orchestration
 - public multi-tenant SaaS concerns
@@ -104,8 +111,20 @@ Important notes:
 
 - `BITBUCKET_API_TOKEN` must not be stored in `.env` or committed files
 - `MCP_BB_INTERNAL_API_KEY` is optional and should also stay outside repo files
-- `BITBUCKET_DEFAULT_DESTINATION_BRANCH` can provide the default target branch for PR creation
-- `MCP_BB_ENABLED_WRITE_TOOLS` can reduce the exposed mutation surface
+- `BITBUCKET_REPOSITORIES_JSON` lists the approved repositories; each entry supports `id`, `displayName`, `workspace`, `repoSlug`, `defaultDestinationBranch`, `status` (`active`/`disabled`) and `allowMerge` (default `false`)
+- `BITBUCKET_DEFAULT_REPOSITORY` selects the repository used when a tool call omits `repository_id`
+- `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG`, `BITBUCKET_DEFAULT_DESTINATION_BRANCH` and `BITBUCKET_ALLOW_MERGE` remain supported as a legacy single-repository configuration
+- `MCP_BB_ENABLED_WRITE_TOOLS` can reduce the exposed mutation surface (`add_pull_request_comment`, `create_pull_request`, `open_pull_request`, `run_pipeline`, `merge_pull_request`)
+
+### Merge Confirmation Flow
+
+`merge_pull_request` never merges on the first call:
+
+1. The agent calls the tool with `pr_id` (and optional `merge_strategy`, `close_source_branch`, `message`). The server returns a pull request summary, a single-use `confirmation_token` valid for five minutes, and instructions to ask the user for confirmation.
+2. The agent shows the summary in chat and waits for an explicit "yes" from the user.
+3. Only then the agent calls the tool again with the same parameters plus `confirmation_token`. Tokens are bound to repository, pull request and merge parameters; mismatches, reuse or expiry are rejected and a new summary must be requested.
+
+Repositories with `allowMerge` unset or `false` reject the tool outright, and the tool is not even listed when no active repository allows merges.
 
 ## Run
 
@@ -177,6 +196,33 @@ Read failed pipeline output:
     "tool": "get_pipeline_failure_output",
     "arguments": {
         "pipeline_ref": "{11111111-2222-3333-4444-555555555555}"
+    }
+}
+```
+
+Run a custom pipeline on a branch of a specific repository:
+
+```json
+{
+    "tool": "run_pipeline",
+    "arguments": {
+        "repository_id": "backend",
+        "branch": "release/1.4",
+        "pipeline_name": "deploy-staging"
+    }
+}
+```
+
+Merge a pull request (first call returns the summary and token, second call confirms):
+
+```json
+{
+    "tool": "merge_pull_request",
+    "arguments": {
+        "repository_id": "backend",
+        "pr_id": 42,
+        "merge_strategy": "squash",
+        "confirmation_token": "<token from the previous call, after the user confirmed in chat>"
     }
 }
 ```

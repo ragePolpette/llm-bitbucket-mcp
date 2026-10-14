@@ -4,6 +4,7 @@ export class BitbucketRepositoryRegistry {
         for (const repository of repositories) {
             this._repositories.set(repository.id, {
                 ...repository,
+                allowMerge: repository.allowMerge === true,
                 client: createClient(repository),
             });
         }
@@ -24,16 +25,27 @@ export class BitbucketRepositoryRegistry {
         return repository;
     }
 
-    list() {
-        return [...this._repositories.values()].map(({ client: _client, ...repository }) => ({
+    describe(repository) {
+        return {
             id: repository.id,
             displayName: repository.displayName,
             workspace: repository.workspace,
             repoSlug: repository.repoSlug,
             defaultDestinationBranch: repository.defaultDestinationBranch || "",
             status: repository.status,
+            allowMerge: repository.allowMerge === true,
             isDefault: repository.id === this._defaultRepositoryId,
-        }));
+        };
+    }
+
+    list() {
+        return [...this._repositories.values()].map((repository) => this.describe(repository));
+    }
+
+    get mergeAvailable() {
+        return [...this._repositories.values()].some(
+            (repository) => repository.status === "active" && repository.allowMerge === true,
+        );
     }
 
     get defaultRepositoryId() {
