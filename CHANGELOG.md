@@ -13,7 +13,7 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
 ### Added
 
-- Opt-in review tools `approve_pull_request`, `unapprove_pull_request`, `reply_to_pull_request_comment`, `create_pull_request_task` and `resolve_pull_request_task`. They are write tools that are not enabled by default and must be listed in `MCP_BB_ENABLED_WRITE_TOOLS`.
+- Opt-in review tools `approve_pull_request`, `unapprove_pull_request`, `create_pull_request_task` and `resolve_pull_request_task`. They are write tools that are not enabled by default and must be listed in `MCP_BB_ENABLED_WRITE_TOOLS`.
 - Opt-in `decline_pull_request` tool with the same two-step confirmation as `merge_pull_request`, gated by the per-repository `allowMerge` switch.
 - `wait_for_pipeline` read-only tool that polls a pipeline until it completes or pauses, bounded by `timeout_seconds` (max 600) and `poll_interval_seconds` (5 to 60).
 - `list_pull_requests` accepts and validates an optional `destination_branch` filter.
