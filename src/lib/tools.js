@@ -293,6 +293,27 @@ export const TOOLS = [
         },
     },
     {
+        name: "update_pull_request",
+        description:
+            "Update the title and/or description of a pull request. Provide at least one of them; fields omitted keep their current value.",
+        annotations: { readOnlyHint: false, idempotentHint: true },
+        inputSchema: {
+            type: "object",
+            properties: {
+                pr_id: PR_ID,
+                title: {
+                    type: "string",
+                    description: "New pull request title.",
+                },
+                description: {
+                    type: "string",
+                    description: "New pull request description (Markdown supported).",
+                },
+            },
+            required: ["pr_id"],
+        },
+    },
+    {
         name: "create_pull_request_task",
         description: "Create a task on a pull request, optionally attached to an existing comment.",
         annotations: { readOnlyHint: false, idempotentHint: false },

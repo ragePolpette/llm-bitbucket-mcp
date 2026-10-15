@@ -9,6 +9,10 @@ Versioning follows Semantic Versioning (`MAJOR.MINOR.PATCH`).
 
 ### Added
 
+- Opt-in `update_pull_request` tool to edit the title and/or description of a pull request (at least one is required; omitted fields keep their current value).
+
+### Added
+
 - Opt-in review tools `approve_pull_request`, `unapprove_pull_request`, `reply_to_pull_request_comment`, `create_pull_request_task` and `resolve_pull_request_task`. They are write tools that are not enabled by default and must be listed in `MCP_BB_ENABLED_WRITE_TOOLS`.
 - Opt-in `decline_pull_request` tool with the same two-step confirmation as `merge_pull_request`, gated by the per-repository `allowMerge` switch.
 - `wait_for_pipeline` read-only tool that polls a pipeline until it completes or pauses, bounded by `timeout_seconds` (max 600) and `poll_interval_seconds` (5 to 60).
