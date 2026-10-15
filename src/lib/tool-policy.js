@@ -7,6 +7,7 @@ export const DEFAULT_ENABLED_WRITE_TOOLS = [
 ];
 
 export const OPT_IN_WRITE_TOOLS = [
+    "update_pull_request",
     "approve_pull_request",
     "unapprove_pull_request",
     "decline_pull_request",

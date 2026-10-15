@@ -51,6 +51,8 @@ export async function handleToolCall(name, args, client, policy = {}) {
             return handleGetPipelineStepLog(args, client);
         case "add_pull_request_comment":
             return handleAddPRComment(args, client);
+        case "update_pull_request":
+            return handleUpdatePR(args, client);
         case "reply_to_pull_request_comment":
             return handleReplyToPRComment(args, client);
         case "create_pull_request_task":
@@ -111,6 +113,8 @@ function handleBitbucketInfo(client, policy) {
                 "Reads the log of a single step, even if successful or still running, safely truncated.",
             run_pipeline:
                 "Starts the default pipeline of the branch or a custom pipeline by name; returns uuid and build number of the created run.",
+            update_pull_request:
+                "Updates only title and/or description. Both are optional; at least one is required.",
             reply_to_pull_request_comment:
                 "Replies to an existing comment; use the comment id from get_pull_request_comments as parent_id.",
             create_pull_request_task:
@@ -749,6 +753,41 @@ async function handleReplyToPRComment(args, client) {
         success: true,
         comment_id: result.id,
         parent_id: result.parent?.id ?? parentId,
+        link: result.links?.html?.href,
+    };
+}
+
+async function handleUpdatePR(args, client) {
+    const prId = requirePositiveIntegerParam(args, "pr_id");
+    const title = validateOptionalString(args.title, "title", {
+        maxLength: TOOL_LIMITS.titleLength,
+    });
+    const description = validateOptionalString(args.description, "description", {
+        maxLength: TOOL_LIMITS.descriptionLength,
+    });
+    if (title === null && description === null) {
+        throw new Error("Nothing to update: pass at least one of title or description.");
+    }
+
+    const body = {};
+    if (title !== null) body.title = title;
+    if (description !== null) body.description = description;
+
+    const path = `pullrequests/${prId}`;
+    logger.logApiCall("PUT", path, "update_pull_request", "in", {
+        updates_title: title !== null,
+        updates_description: description !== null,
+    });
+    const result = await client.request("PUT", client.repoPath(path), { body });
+    logger.logApiCall("PUT", path, "update_pull_request", "out", {
+        success: true,
+        entry_id: result.id,
+    });
+
+    return {
+        success: true,
+        id: result.id,
+        title: result.title,
         link: result.links?.html?.href,
     };
 }

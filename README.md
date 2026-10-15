@@ -19,7 +19,7 @@ It is designed for developer tooling, personal automation, and small-team intern
 - pipeline runs on a branch (default or custom pipeline)
 - pull request creation
 - pull request comments and replies
-- opt-in review actions: approve, unapprove, create and resolve tasks
+- opt-in review actions: approve, unapprove, create and resolve tasks; edit the pull request title or description
 - pull request merge and decline gated per repository and by an explicit two-step confirmation
 - multiple approved repositories selected per tool call via `repository_id`
 - a constrained repository-scoped API escape hatch kept out of the default public tool catalog
@@ -52,7 +52,8 @@ Opt-in write tools, only listed when named in `MCP_BB_ENABLED_WRITE_TOOLS`:
 
 - `approve_pull_request`
 - `unapprove_pull_request`
-- `reply_to_pull_request_comment`
+- `update_pull_request` (opt-in)
+- `reply_to_pull_request_comment` (opt-in)
 - `create_pull_request_task`
 - `resolve_pull_request_task`
 - `decline_pull_request` (also requires a repository with `allowMerge: true`)
@@ -106,7 +107,7 @@ Important notes:
 - `BITBUCKET_REPOSITORIES_JSON` lists the approved repositories; each entry supports `id`, `displayName`, `workspace`, `repoSlug`, `defaultDestinationBranch`, `status` (`active`/`disabled`) and `allowMerge` (default `false`)
 - `BITBUCKET_DEFAULT_REPOSITORY` selects the repository used when a tool call omits `repository_id`
 - `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG`, `BITBUCKET_DEFAULT_DESTINATION_BRANCH` and `BITBUCKET_ALLOW_MERGE` remain supported as a legacy single-repository configuration
-- `MCP_BB_ENABLED_WRITE_TOOLS` is the write tool allowlist. When unset it enables `add_pull_request_comment`, `create_pull_request`, `open_pull_request`, `run_pipeline` and `merge_pull_request`. The review tools (`approve_pull_request`, `unapprove_pull_request`, `reply_to_pull_request_comment`, `create_pull_request_task`, `resolve_pull_request_task`, `decline_pull_request`) are never enabled by default: list them explicitly, together with any default tool you want to keep
+- `MCP_BB_ENABLED_WRITE_TOOLS` is the write tool allowlist. When unset it enables `add_pull_request_comment`, `create_pull_request`, `open_pull_request`, `run_pipeline` and `merge_pull_request`. The review and edit tools (`approve_pull_request`, `unapprove_pull_request`, `reply_to_pull_request_comment`, `create_pull_request_task`, `resolve_pull_request_task`, `decline_pull_request`, `update_pull_request`) are never enabled by default: list them explicitly, together with any default tool you want to keep
 
 ### Merge Confirmation Flow
 

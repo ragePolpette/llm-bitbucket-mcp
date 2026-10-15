@@ -59,6 +59,45 @@ test("unapprove_pull_request deletes the approval", async () => {
     assert.deepEqual(result, { approved: false, pr_id: 5 });
 });
 
+test("update_pull_request patches title and description", async () => {
+    const client = createRecordingClient(() => ({
+        id: 5,
+        title: "New title",
+        links: { html: { href: "https://bitbucket/pr/5" } },
+    }));
+
+    const result = await handleToolCall(
+        "update_pull_request",
+        { pr_id: 5, title: "New title", description: "Updated body" },
+        client,
+    );
+
+    assert.deepEqual(client.requests[0], {
+        method: "PUT",
+        path: "/repositories/ws/repo/pullrequests/5",
+        body: { title: "New title", description: "Updated body" },
+        queryParams: undefined,
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.id, 5);
+    assert.equal(result.title, "New title");
+    assert.equal(result.link, "https://bitbucket/pr/5");
+
+    client.requests.length = 0;
+    await handleToolCall("update_pull_request", { pr_id: 5, title: "Only title" }, client);
+    assert.deepEqual(client.requests[0].body, { title: "Only title" });
+
+    await assert.rejects(
+        () => handleToolCall("update_pull_request", { pr_id: 5 }, client),
+        /Nothing to update/,
+    );
+    await assert.rejects(
+        () => handleToolCall("update_pull_request", { pr_id: "5", title: "x" }, client),
+        /pr_id/,
+    );
+    assert.equal(client.requests.length, 1, "rejected calls must not hit the API");
+});
+
 test("reply_to_pull_request_comment posts a comment with a parent id", async () => {
     const client = createRecordingClient(() => ({
         id: 900,
